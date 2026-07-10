@@ -1,0 +1,68 @@
+# Routing table: data, not code. Candidates tried in order; ProviderError
+# falls through to the next. Prices are USD per 1M tokens.
+#
+# Deliberate committee design: bull_case and bear_case lead with DIFFERENT
+# providers so the two cases come from different models. Their disagreement
+# is a feature; a test enforces the lists stay divergent.
+
+models:
+  gpt-4o:            { provider: openai,    tier: high,  price_in: 2.50, price_out: 10.00 }
+  gpt-4o-mini:       { provider: openai,    tier: cheap, price_in: 0.15, price_out: 0.60 }
+  claude-sonnet-4-5: { provider: anthropic, tier: high,  price_in: 3.00, price_out: 15.00 }
+  claude-haiku-4-5:  { provider: anthropic, tier: cheap, price_in: 1.00, price_out: 5.00 }
+  gemini-2.0-flash:  { provider: gemini,    tier: cheap, price_in: 0.10, price_out: 0.40 }
+  gemini-2.5-pro:    { provider: gemini,    tier: high,  price_in: 1.25, price_out: 10.00 }
+
+task_types:
+  screening:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
+  triage:
+    - gpt-4o-mini
+    - gemini-2.0-flash
+    - claude-haiku-4-5
+  fundamentals:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
+  deep_research:
+    - claude-sonnet-4-5
+    - gpt-4o
+    - gemini-2.5-pro
+  catalyst:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
+  bull_case:
+    - claude-sonnet-4-5
+    - gemini-2.5-pro
+    - gpt-4o
+  bear_case:
+    - gpt-4o
+    - gemini-2.5-pro
+    - claude-sonnet-4-5
+  structuring_assist:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
+  verdict:
+    - claude-sonnet-4-5
+    - gpt-4o
+    - gemini-2.5-pro
+  reevaluation:
+    - claude-sonnet-4-5
+    - gpt-4o
+    - gemini-2.5-pro
+  portfolio_review:
+    - claude-sonnet-4-5
+    - gpt-4o
+    - gemini-2.5-pro
+  postmortem:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
+
+# high-risk tasks may only use high-tier models, regardless of candidate order
+risk_rules:
+  high_requires_tier: high
