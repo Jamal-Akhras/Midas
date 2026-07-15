@@ -1,0 +1,21 @@
+# SECRETS — never commit. The repo must work from .env.example alone.
+.env
+
+# runtime state (ledger, marks, audit) — data, not code
+midas.db
+midas.db-*
+midas_demo.db
+*.db
+*.db-shm
+*.db-wal
+archive/
+
+# one-time operational scripts from the 2026-07-13 incident
+diag.py
+fix_cash.py
+
+# python noise
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
