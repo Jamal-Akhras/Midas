@@ -98,9 +98,19 @@ class Settings(BaseSettings):
     # shares. Caveat: fractional mirror orders are market-only and get NO
     # resting GTC stop at Alpaca - the monitor's passes are their stop layer.
     fractional_shares: bool = True
-    # Regime gate: no NEW entries (and no auto-cycle spend) while SPY is
-    # below its 200-day average. Exits and stops always run.
+    # Regime gate: SPY below its 200-day average scales ALL risk budgets by
+    # regime_throttle. 0.0 = binary block (no entries, no research spend),
+    # 0.5 = half-throttle (entries allowed at half risk), 1.0 = ignore.
+    # Exits and stops always run regardless.
     regime_filter_enabled: bool = True
+    regime_throttle: float = 0.5
+    # Full-market deep scan: deterministic pre-filter over every tradable
+    # US common stock before the LLM screener. $0 AI; ~250 API calls/day.
+    deep_scan_enabled: bool = True
+    deep_scan_min_price: float = 5.0
+    deep_scan_min_dollar_volume: float = 20_000_000.0
+    deep_scan_max_bars: int = 150   # survivors that get full bar analysis
+    deep_scan_keep: int = 15        # setups handed to the LLM screener
     # Option fill friction for SIMULATOR fills (broker fills are real): pay
     # through the mid by this % on entry, give it up on exit, plus fees.
     option_slippage_pct: float = 1.0
@@ -213,6 +223,11 @@ EDITABLE_SETTINGS: dict[str, dict] = {
     "REQUIRE_BROKER_FILLS":     {"attr": "require_broker_fills", "type": "bool", "group": "execution", "fingerprint": False},
     "ALPACA_MIRROR_OPTIONS":    {"attr": "alpaca_mirror_options", "type": "bool", "group": "execution", "fingerprint": False},
     "REGIME_FILTER_ENABLED":    {"attr": "regime_filter_enabled", "type": "bool", "group": "risk", "fingerprint": True},
+    "REGIME_THROTTLE":          {"attr": "regime_throttle", "type": "float", "group": "risk", "fingerprint": True},
+    "DEEP_SCAN_ENABLED":        {"attr": "deep_scan_enabled", "type": "bool", "group": "universe", "fingerprint": False},
+    "DEEP_SCAN_MIN_DOLLAR_VOLUME": {"attr": "deep_scan_min_dollar_volume", "type": "float", "group": "universe", "fingerprint": False},
+    "DEEP_SCAN_MAX_BARS":       {"attr": "deep_scan_max_bars", "type": "int", "group": "universe", "fingerprint": False},
+    "DEEP_SCAN_KEEP":           {"attr": "deep_scan_keep", "type": "int", "group": "universe", "fingerprint": False},
 }
 
 

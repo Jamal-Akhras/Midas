@@ -81,6 +81,15 @@ def _pin_market_state(monkeypatch):
 
     monkeypatch.setattr(_config, "reload_settings", lambda: None)
     monkeypatch.setattr(_config.settings, "alpaca_mirror_orders", False)
+    # the suite's baseline must not depend on the operator's live .env:
+    # these are the values the tests were written against
+    monkeypatch.setattr(_config.settings, "max_total_premium_pct", 10.0)
+    monkeypatch.setattr(_config.settings, "paper_starting_cash", 100_000.0)
+    monkeypatch.setattr(_config.settings, "daily_spend_limit_usd", 10.0)
+    monkeypatch.setattr(_config.settings, "auto_cycle_max_committees", 4)
+    monkeypatch.setattr(_config.settings, "universe", "demo")
+    monkeypatch.setattr(_config.settings, "watchlist", "")
+    monkeypatch.setattr(_config.settings, "deep_scan_enabled", False)
     monkeypatch.setattr(monitor, "market_session_open", lambda: True)
     monkeypatch.setattr(monitor, "market_regime",
                         lambda db: {"risk_on": True, "detail": "test", "date": ""})

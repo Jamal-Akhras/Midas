@@ -140,6 +140,12 @@ def main() -> None:
                       f"(mark {mark}, uP&L {upnl:+.2f}, "
                       f"next review {p.next_review_at})")
     elif args.cmd == "monitor":
+        import logging as _logging
+
+        _logging.basicConfig(
+            level=_logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%H:%M:%S")
         from midas.scheduler.monitor import run_monitor_once
 
         while True:

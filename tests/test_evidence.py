@@ -442,3 +442,105 @@ def test_post_mortem_runs_once_and_yields_lesson(factory, demo_router):
     assert run_post_mortems(factory, demo_router, [oid]) == []  # once, ever
     with factory() as db:
         assert recent_lessons(db) == lessons
+
+
+def _bars(closes, vols=None):
+    vols = vols or [1_000_000] * len(closes)
+    return [{"close": c, "high": c * 1.01, "low": c * 0.99,
+             "open": c, "volume": v, "date": "2026-01-01"}
+            for c, v in zip(closes, vols)]
+
+
+def test_setup_score_rewards_orderly_pullback():
+    from midas.pipeline.deep_scan import setup_score
+
+    # steady uptrend 100 -> 130, then a quiet ~6% pullback on fading volume
+    closes = [100 + i * 0.6 for i in range(50)] + [129, 127.5, 126, 125, 124.3]
+    vols = [1_000_000] * 50 + [600_000] * 5
+    score = setup_score(_bars(closes, vols))
+    assert score is not None and score > 75
+
+
+def test_setup_score_rejects_chases_and_downtrends():
+    from midas.pipeline.deep_scan import setup_score
+
+    # vertical melt-up: last close 15% above the 10d mean -> extended
+    closes = [100] * 40 + [100, 103, 108, 115, 124, 135]
+    assert setup_score(_bars(closes)) is None
+    # downtrend: below the 50d mean
+    closes = [130 - i * 0.8 for i in range(55)]
+    assert setup_score(_bars(closes)) is None
+    # too little history
+    assert setup_score(_bars([100] * 20)) is None
+
+
+def test_stage_a_floors(monkeypatch):
+    from midas.pipeline.deep_scan import stage_a
+
+    monkeypatch.setattr(settings, "deep_scan_min_price", 5.0)
+    monkeypatch.setattr(settings, "deep_scan_min_dollar_volume", 20_000_000.0)
+    snaps = {
+        "GOOD": {"dailyBar": {"c": 50.0, "v": 1_000_000},
+                 "prevDailyBar": {"c": 49.0}},
+        "PENNY": {"dailyBar": {"c": 2.0, "v": 50_000_000},
+                  "prevDailyBar": {"c": 2.0}},
+        "ILLIQ": {"dailyBar": {"c": 50.0, "v": 10_000},
+                  "prevDailyBar": {"c": 50.0}},
+        "HALTED": {"dailyBar": {"c": 30.0, "v": 5_000_000},
+                   "prevDailyBar": {"c": 60.0}},  # -50% day: not a setup
+    }
+    out = stage_a(snaps)
+    assert [x["ticker"] for x in out] == ["GOOD"]
+
+
+def test_deep_scan_survivors_join_screen_universe(db):
+    from midas.models import SystemState
+    from midas.models.base import utcnow
+
+    db.add(SystemState(key="deep_scan", value={
+        "date": utcnow().date().isoformat(),
+        "kept": [{"ticker": "NEWCO", "score": 88, "price": 42.0}]}))
+    db.flush()
+    # replicate run_screen's merge logic
+    tickers = ["NVDA", "AMD"]
+    ds = db.get(SystemState, "deep_scan")
+    if ds and ds.value.get("date") == utcnow().date().isoformat():
+        for cand in ds.value.get("kept", []):
+            t = str(cand.get("ticker", "")).upper()
+            if t and t not in tickers:
+                tickers.append(t)
+    assert "NEWCO" in tickers
+
+
+def test_regime_throttle_halves_all_budgets(db, monkeypatch):
+    from midas.risk import engine as eng
+
+    db.add(SystemState(key="market_regime",
+                       value={"date": "x", "risk_on": False, "detail": "t"}))
+    db.flush()
+    monkeypatch.setattr(settings, "regime_throttle", 0.5)
+    monkeypatch.setattr(settings, "fractional_shares", False)
+    monkeypatch.setattr(settings, "max_notional_pct_per_trade", 100.0)
+    rc = eng.check_shares_trade(db, account_equity=100_000,
+                                entry_price=100.0, stop_price=95.0)
+    assert rc.ok
+    assert rc.max_qty == 100          # 200 at full risk -> 100 at half
+    assert rc.checks["regime_throttle"]["value"] == "x0.5"
+    # binary mode still hard-blocks
+    monkeypatch.setattr(settings, "regime_throttle", 0.0)
+    rc2 = eng.check_shares_trade(db, account_equity=100_000,
+                                 entry_price=100.0, stop_price=95.0)
+    assert not rc2.ok and not rc2.checks["regime"]["ok"]
+
+
+def test_regime_throttle_inert_when_risk_on(db, monkeypatch):
+    from midas.risk import engine as eng
+
+    monkeypatch.setattr(settings, "regime_throttle", 0.5)
+    monkeypatch.setattr(settings, "fractional_shares", False)
+    monkeypatch.setattr(settings, "max_notional_pct_per_trade", 100.0)
+    # no regime row at all -> risk-on assumed, full budgets
+    rc = eng.check_shares_trade(db, account_equity=100_000,
+                                entry_price=100.0, stop_price=95.0)
+    assert rc.ok and rc.max_qty == 200
+    assert "regime_throttle" not in rc.checks

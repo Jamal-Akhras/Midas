@@ -160,6 +160,18 @@ def open_premium_usd(db: Session) -> float:
     )
 
 
+def regime_throttle(db: Session) -> float:
+    """Risk multiplier from today's market regime. Below the 200-day the
+    committee may still trade - with budgets scaled by REGIME_THROTTLE.
+    The narrative ('it is just a dip') never argues with this number."""
+    if not settings.regime_filter_enabled:
+        return 1.0
+    row = db.get(SystemState, "market_regime")
+    if row is None or row.value.get("risk_on", True):
+        return 1.0
+    return max(0.0, min(float(settings.regime_throttle), 1.0))
+
+
 # ---------- sizing ----------
 
 def check_shares_trade(
@@ -181,9 +193,16 @@ def check_shares_trade(
     ok &= _check(checks, "positive_equity", account_equity > 0,
                  account_equity, "> 0")
     ok = bool(ok) and ok  # normalize
+    throttle = regime_throttle(db)
+    if throttle <= 0:
+        ok = _check(checks, "regime", False, "risk-off (throttle 0)",
+                    "SPY above 200d, or throttle > 0")
+    elif throttle < 1:
+        _check(checks, "regime_throttle", True, f"x{throttle}",
+               "risk-off: budgets scaled down")
     max_qty = 0.0
     if ok and risk_per_share > 0:
-        risk_budget = account_equity * settings.per_trade_risk_pct / 100
+        risk_budget = account_equity * settings.per_trade_risk_pct / 100 * throttle
         max_qty = (round(risk_budget / risk_per_share, 3)
                    if settings.fractional_shares
                    else int(risk_budget / risk_per_share))
@@ -193,7 +212,7 @@ def check_shares_trade(
         # notional cap: a tight stop must not concentrate the whole account
         # into one name (gap risk ignores stops)
         raw_cap = (account_equity * settings.max_notional_pct_per_trade / 100
-                   / max(entry_price, 0.01))
+                   * throttle / max(entry_price, 0.01))
         notional_cap_qty = (round(raw_cap, 3) if settings.fractional_shares
                             else int(raw_cap))
         if notional_cap_qty < max_qty:
@@ -231,11 +250,18 @@ def check_option_trade(
 
     max_contracts = 0
     max_premium = 0.0
+    throttle = regime_throttle(db)
+    if throttle <= 0:
+        ok = _check(checks, "regime", False, "risk-off (throttle 0)",
+                    "SPY above 200d, or throttle > 0")
+    elif throttle < 1:
+        _check(checks, "regime_throttle", True, f"x{throttle}",
+               "risk-off: budgets scaled down")
     if ok:
         per_trade_cap = account_equity * min(
             settings.per_trade_risk_pct, settings.max_premium_pct_per_trade
-        ) / 100
-        total_cap = account_equity * settings.max_total_premium_pct / 100
+        ) / 100 * throttle
+        total_cap = account_equity * settings.max_total_premium_pct / 100 * throttle
         already_open = open_premium_usd(db)
         room = max(total_cap - already_open, 0.0)
         max_premium = min(per_trade_cap, room)

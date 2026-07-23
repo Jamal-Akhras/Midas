@@ -527,8 +527,9 @@ def maybe_auto_cycle(session_factory: Callable[[], Session],
     if not _market_open_today():
         return None  # holidays: a 'weekday' with no market is not a trading day
     with session_factory() as db:
-        if not market_regime(db)["risk_on"]:
-            return None  # risk-off: no research spend on entries we refuse to take
+        if (not market_regime(db)["risk_on"]
+                and settings.regime_throttle <= 0):
+            return None  # binary risk-off: no research spend on refused entries
     from datetime import datetime as _dt
 
     from midas.models import SystemState
@@ -562,6 +563,16 @@ def maybe_auto_cycle(session_factory: Callable[[], Session],
                 db.commit()
         return {"resumed": stuck, "committees": results}
 
+    if settings.deep_scan_enabled:
+        try:
+            from midas.pipeline.deep_scan import run_deep_scan
+
+            with session_factory() as db:
+                ds = run_deep_scan(db)
+                db.commit()
+            logger.info("deep scan kept %s setups", len(ds.get("kept", [])))
+        except Exception:
+            logger.exception("deep scan failed; screening universe only")
     content = run_screen(session_factory, router)
     results = {}
     candidates = sorted(content.get("candidates", []),
@@ -866,7 +877,8 @@ def _strategy_fingerprint() -> str:
         "max_holding_days", "breakeven_at_r", "trail_lookback_days",
         "option_slippage_pct", "option_fee_per_contract",
         "universe", "auto_cycle_max_committees",
-        "paper_starting_cash", "fractional_shares")}
+        "paper_starting_cash", "fractional_shares", "regime_throttle",
+        "regime_filter_enabled")}
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())
     try:
         h.update((Path(providers.__file__).parent / "routing.yaml").read_bytes())
@@ -1009,8 +1021,9 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
         regime = market_regime(db)
         summary["regime"] = regime["detail"] + (" [RISK-OFF]" if not regime["risk_on"] else "")
         summary["premarket_flags"] = premarket_gap_sweep(db)
+        regime_ok = regime["risk_on"] or settings.regime_throttle > 0
         summary["executed"] = (execute_approved_theses(db)
-                               if session_open and regime["risk_on"] else 0)
+                               if session_open and regime_ok else 0)
         summary["stops_ratcheted"] = ratchet_stops(db)
         summary["time_stops"] = apply_time_stops(db) if session_open else []
         try:

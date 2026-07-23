@@ -1,10 +1,14 @@
 # Midas
 
+[![ci](https://github.com/Jamal-Akhras/Midas/actions/workflows/ci.yml/badge.svg)](https://github.com/Jamal-Akhras/Midas/actions/workflows/ci.yml)
+
 A personal, single-user trading committee bot. A committee of AI agents
 researches candidates with real tools (market data, SEC EDGAR, news, web
 search), argues bull vs bear on different models, structures defined-risk
 option trades through deterministic code checks, and issues fully-audited
 verdicts that the operator approves - paper trading only.
+
+![The Midas Analyst Workstation: live committee stance (bull vs bear), a deterministic risk budget, open positions, the equity curve, and a per-agent cost scoreboard](docs/images/workstation.png)
 
 **This is decision-support tooling, not financial advice.** Single user,
 own money, no public exposure. Every decision can be reconstructed months
@@ -94,6 +98,10 @@ execution time; the execution-time result is stored on the order.
 
 `midas ui` serves a local web console (127.0.0.1 only, stdlib server, zero
 extra dependencies) over the same audited code paths as the CLI. Five tabs:
+
+![A full committee run for AAPL end to end: each agent output with its cost, a bull case (8/10) and bear case (4/10) argued side by side, SEC-filing provenance, deterministic option-structure and risk checks, and the final NO TRADE verdict](docs/images/decision-trace.png)
+
+*One committee run, fully traced: the bull and bear analysts argue on different models, the structurer and risk engine are deterministic code (here: no valid option structure, all risk checks pass), every claim links back to a SEC filing or news source, and the verdict — NO TRADE — is recorded with its reasoning.*
 
 - **Overview**: live ticker tape over the universe/watchlist, KPI strip
   (equity, open P&L, realized today/week, premium-at-risk vs cap, win rate,

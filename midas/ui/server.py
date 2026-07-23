@@ -330,6 +330,8 @@ def build_state() -> dict:
         broker_equity = be_row.value if be_row else None
         cyc_row = db.get(SystemState, "last_auto_cycle")
         sweep_row = db.get(SystemState, "last_premarket_sweep")
+        ds_row = db.get(SystemState, "deep_scan")
+        regime_row = db.get(SystemState, "market_regime")
         gate_utc = None
         try:
             from datetime import datetime as _dtm
@@ -349,6 +351,13 @@ def build_state() -> dict:
             "premarket": (sweep_row.value if sweep_row and
                           str(sweep_row.value.get("at", ""))[:10]
                           == utcnow().date().isoformat() else None),
+            "deep_scan": (ds_row.value if ds_row and
+                          ds_row.value.get("date")
+                          == utcnow().date().isoformat() else None),
+            "regime": ({**regime_row.value,
+                        "throttle": settings.regime_throttle}
+                       if regime_row and regime_row.value.get("date")
+                       == utcnow().date().isoformat() else None),
         }
 
         from midas.config import EDITABLE_SETTINGS

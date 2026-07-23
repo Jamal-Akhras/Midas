@@ -325,7 +325,7 @@ async function poll(){
 }
 setInterval(poll,2500); poll();
 setInterval(()=>{if(chartTicker&&!document.hidden)loadBars();},60000);
-setInterval(()=>{$('clock').textContent=new Date().toISOString().slice(0,19).replace('T',' ')+'Z';},1000);
+setInterval(()=>{const n=new Date();$('clock').textContent=n.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'})+' · '+n.toISOString().slice(11,16)+'Z';},1000);
 
 async function act(n){await fetch('/api/actions/'+n,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});setTimeout(poll,400);}
 async function actRun(){
@@ -373,7 +373,7 @@ function renderAll(){
   else{const m=Math.round(mhb.ago_seconds/60);
     $('hb-txt').textContent=m<1?'just now':m+'m ago';
     $('hb-txt').style.color=mhb.ago_seconds>4200?'var(--red)':m>35?'var(--amber)':'var(--green)';
-    $('pill-hb').title='last monitor pass '+mhb.at+(mhb.next_pass_at?' · next ≈ '+mhb.next_pass_at.slice(11,16)+'Z':'')+(mhb.ago_seconds>4200?' — LOOP MAY BE DOWN':'');}
+    $('pill-hb').title='last monitor pass '+fmtLocal(mhb.at)+(mhb.next_pass_at?' · next ≈ '+fmtLocal(mhb.next_pass_at):'')+(mhb.ago_seconds>4200?' — LOOP MAY BE DOWN':'');}
   $('clearhalt').style.display=halted?'':'none';
   const hb=$('haltbar'); hb.style.display=halted?'flex':'none';
   if(halted) hb.innerHTML='⚠ Pipeline halted — '+esc(s.halt.reason)+' <span style="color:var(--dim)">(operator must clear)</span>';
@@ -631,7 +631,7 @@ function renderSys(){
     '<span>alpaca mirror '+yn(c.mirror_orders)+'</span>'+
     '<span>standing stops '+yn(c.standing_stops)+'</span>'+
     '<span>time stop <b>'+c.max_holding_days+'d</b></span></div>'+
-    (STATE.broker_equity?'<div style="font-size:11px;margin-top:8px;color:'+(Math.abs(STATE.broker_equity.internal-STATE.broker_equity.alpaca)/STATE.broker_equity.alpaca>0.03?'var(--red)':'var(--dim)')+'">books check: internal '+usd(STATE.broker_equity.internal)+' vs Alpaca '+usd(STATE.broker_equity.alpaca)+' ('+esc((STATE.broker_equity.at||'').slice(11,16))+'Z)</div>':'')+
+    (STATE.broker_equity?'<div style="font-size:11px;margin-top:8px;color:'+(Math.abs(STATE.broker_equity.internal-STATE.broker_equity.alpaca)/STATE.broker_equity.alpaca>0.03?'var(--red)':'var(--dim)')+'">books check: internal '+usd(STATE.broker_equity.internal)+' vs Alpaca '+usd(STATE.broker_equity.alpaca)+' ('+fmtLocal(STATE.broker_equity.at)+')</div>':'')+
     '<div style="font-size:11px;color:var(--faint);margin-top:8px">keys detected (presence only): '+
     Object.entries(c.keys).map(([k,v])=>k+' '+key(v)).join(' · ')+'</div>';
 }
@@ -654,13 +654,30 @@ function renderL3(){
       ' vs AI cost '+usd(s.self_funding.ai_spend_30d)+' <span style="color:var(--faint)">(evidence, not income)</span></div>':'');
 }
 
-function fmtUTC(iso){return (iso||'').slice(11,16)+'Z';}
+function fmtLocal(t){
+  const d = t instanceof Date ? t : new Date(t);
+  return isNaN(d) ? '—' : d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function fmtUTC(iso){return fmtLocal(iso);}
 function renderPipeline(){
   const pt=STATE.pipeline_today||{}; const mkt=STATE.market_open;
   let html='';
   html+='<div style="font-size:12px;margin-bottom:6px"><b style="color:var(--dim)">Premarket sweep</b> — '+
     (pt.premarket?fmtUTC(pt.premarket.at)+' · '+((pt.premarket.flagged||[]).length?'flagged: <span class="mono" style="color:var(--amber)">'+esc(pt.premarket.flagged.join(', '))+'</span> (review at open)':'no held ticker gapping ≥'+(STATE.config?STATE.config.premarket_gap_alert_pct||'3':'3')+'%')
      :'<span style="color:var(--faint)">not run today (runs 6:00–9:30 ET on trading days)</span>')+'</div>';
+  if(pt.regime&&pt.regime.risk_on===false){
+    const thr=pt.regime.throttle||0;
+    html+='<div style="font-size:12px;margin-bottom:6px"><b style="color:var(--amber)">RISK-OFF</b> — '+esc(pt.regime.detail)+
+      (thr>0?' · half-throttle: research and entries allowed with all risk budgets ×'+thr
+            :' · no deep scan, research, or new entries today; exits, stops, and reviews stay active')+
+      ' · re-checked each morning</div>';
+  }
+  if(pt.deep_scan){
+    const d=pt.deep_scan;
+    html+='<div style="font-size:12px;margin-bottom:6px"><b style="color:var(--dim)">Deep scan</b> — '+
+      d.symbols_scanned+' symbols → '+d.stage_a_survivors+' liquid → '+(d.kept||[]).length+' setups'+
+      ((d.kept||[]).length?': '+(d.kept||[]).map(x=>'<span class="mono" title="setup score '+x.score+'">'+esc(x.ticker)+'</span>').join(', '):'')+'</div>';
+  }
   if(pt.auto_cycle){
     const c=pt.auto_cycle, res=c.results||{};
     html+='<div style="font-size:12px"><b style="color:var(--dim)">Screen + committees</b> — '+fmtUTC(c.at)+' · '+c.screened+' candidates</div>'+
@@ -681,10 +698,11 @@ function renderPipeline(){
       const gate=pt.cycle_gate_utc?new Date(pt.cycle_gate_utc):null;
       if(gate&&gate>t) t=gate;
       eta=(t<new Date())?' · <span style="color:var(--amber)">next pass overdue — monitor may be down</span>'
-        :' · next attempt ≈ <b class="mono" style="color:var(--txt)">'+t.toISOString().slice(11,16)+'Z</b>'+(gate&&gate>new Date(hb.next_pass_at)?' (waiting for the 9:45 ET gate)':' (next monitor pass)');
+        :' · next attempt ≈ <b class="mono" style="color:var(--txt)">'+fmtLocal(t)+'</b>'+(gate&&gate>new Date(hb.next_pass_at)?' (waiting for the 9:45 ET gate)':' (next monitor pass)');
     } else if(hb){ eta=' · next pass time unknown (monitor running without --loop?)'; }
+    const roff=pt.regime&&pt.regime.risk_on===false&&!((pt.regime.throttle||0)>0);
     html+='<div style="font-size:12px;color:var(--faint)"><b style="color:var(--dim)">Screen + committees</b> — not yet today · '+
-      (mkt===false?'market closed':'runs on the first monitor pass after 9:45 ET')+eta+'</div>';
+      (roff?'blocked by RISK-OFF regime':(mkt===false?'market closed':'runs on the first monitor pass after 9:45 ET'))+(roff?'':eta)+'</div>';
   }
   $('pipeline-today').innerHTML=html;
 }

@@ -21,6 +21,9 @@ def discover_tickers() -> list[str]:
     """Deterministic discovery: Alpaca's most-actives and market movers.
     Zero AI cost - these only JOIN the screening list; the screener and the
     committee still apply every floor and gate. Empty on any failure."""
+    if settings.deep_scan_enabled:
+        return []  # superseded: the deep scan does this job WITH floors -
+                   # most-actives-by-share-volume is structurally penny junk
     if not (settings.discovery_enabled and settings.alpaca_api_key
             and settings.alpaca_api_secret and not settings.effective_demo_mode):
         return []
@@ -84,6 +87,15 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
     with session_factory() as db:
         run = db.get(PipelineRun, run_id)
         tickers = universe_tickers()
+        from midas.models import SystemState
+        from midas.models.base import utcnow as _now
+
+        ds = db.get(SystemState, "deep_scan")
+        if ds and ds.value.get("date") == _now().date().isoformat():
+            for cand in ds.value.get("kept", []):
+                t = str(cand.get("ticker", "")).upper()
+                if t and t not in tickers:
+                    tickers.append(t)
         try:
             _, parsed = run_agent_stage(
                 db, router, run, AGENT_DEFS["screener"],
