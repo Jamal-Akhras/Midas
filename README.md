@@ -42,7 +42,7 @@ midas digest        # weekly digest - the L2 review surface
 midas stats         # track record vs the L3 bar
 midas audit         # the append-only audit trail
 midas ui            # the Command Center: http://127.0.0.1:8420
-pytest              # 49 tests
+pytest              # the whole suite runs offline in demo mode
 ```
 
 Add real keys in `.env` (see `.env.example`) to leave demo mode. Any one
@@ -158,7 +158,7 @@ midas/
   outcomes/digest  weekly digest builder (the L2 review surface)
   ui/              the Command Center (stdlib web server + single-file UI)
   cli.py           the operator console
-tests/             49 tests, all runnable offline in demo mode
+tests/             offline tests (demo mode, in-memory SQLite)
 ```
 
 ## Known limitations (honest list)
