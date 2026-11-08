@@ -29,7 +29,8 @@ not yet cut a release, so everything sits under Unreleased.
   `EventFlag` rows that veto core slices and are scored against forward
   returns; `midas flags scan|list`; a flag ledger section in `midas stats`.
 - Run-time integrity gates: the committee refuses a run whose bull and
-  bear cases came from the same provider; a deterministic sanity gate
+  bear cases came from the same provider (or, with the gate off, records
+  the collision and carries on); a deterministic sanity gate
   checks trade verdicts against the live quote and re-prompts once.
 - Optional LLM gateway support: `OPENAI_BASE_URL` / `ANTHROPIC_BASE_URL`,
   the gateway's cost header stored beside the router's estimate, a

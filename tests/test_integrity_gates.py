@@ -121,7 +121,8 @@ def test_same_provider_cases_refuse_the_run(demo_mode, factory, demo_router):
     assert "REQUIRE_CASE_PROVIDER_DIVERSITY" in result.note
     with factory() as db:
         events = _audit(db, "committee.provider_collision")
-        assert len(events) == 1 and events[0].payload == {"bull": "anthropic", "bear": "anthropic"}
+        assert len(events) == 1
+        assert events[0].payload == {"bull": "anthropic", "bear": "anthropic", "refused": True}
         # the expensive stages after the cases never ran, and no thesis exists
         types = {a.artifact_type for a in db.scalars(select(ResearchArtifact))}
         assert ArtifactType.verdict not in types and ArtifactType.structure not in types
@@ -133,6 +134,12 @@ def test_diversity_gate_can_be_switched_off(demo_mode, factory, demo_router, mon
     demo_router.task_types["bear_case"] = list(demo_router.task_types["bull_case"])
     result = run_committee(factory, demo_router, "ACME")
     assert result.status == RunStatus.awaiting_approval
+    with factory() as db:
+        # the collision is still on the record; only the refusal is switched off
+        events = _audit(db, "committee.provider_collision")
+        assert len(events) == 1
+        assert events[0].payload == {"bull": "anthropic", "bear": "anthropic", "refused": False}
+        assert "not refused" in events[0].summary
 
 
 def test_hallucinated_verdict_is_reprompted_then_refused(

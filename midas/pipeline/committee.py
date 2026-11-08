@@ -227,26 +227,30 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
         run = db.get_one(PipelineRun, run_id)
         bull_provider = stage_provider(db, router, run_id, "bull")
         bear_provider = stage_provider(db, router, run_id, "bear")
-        if (
-            settings.require_case_provider_diversity
-            and bull_provider is not None
-            and bull_provider == bear_provider
-        ):
+        if bull_provider is not None and bull_provider == bear_provider:
+            # Recorded either way: a single-provider debate must never read as a
+            # two-model one in the ledger. The gate decides only whether to stop.
+            refused = settings.require_case_provider_diversity
+            verdict_note = (
+                "one model arguing with itself is not a committee; run refused"
+                if refused
+                else "noted, not refused (REQUIRE_CASE_PROVIDER_DIVERSITY=false)"
+            )
             record_event(
                 db,
                 event_type="committee.provider_collision",
-                summary=f"{ticker}: bull and bear both ran on '{bull_provider}' - "
-                "one model arguing with itself is not a committee; run refused",
+                summary=f"{ticker}: bull and bear both ran on '{bull_provider}' - {verdict_note}",
                 run_id=run_id,
-                payload={"bull": bull_provider, "bear": bear_provider},
+                payload={"bull": bull_provider, "bear": bear_provider, "refused": refused},
             )
-            return _done(
-                db,
-                run,
-                f"refused: bull and bear both produced by '{bull_provider}' "
-                "(REQUIRE_CASE_PROVIDER_DIVERSITY)",
-                status=RunStatus.failed,
-            )
+            if refused:
+                return _done(
+                    db,
+                    run,
+                    f"refused: bull and bear both produced by '{bull_provider}' "
+                    "(REQUIRE_CASE_PROVIDER_DIVERSITY)",
+                    status=RunStatus.failed,
+                )
         db.commit()
 
     # ---- options structurer: code candidates -> LLM assist -> code re-validation ----

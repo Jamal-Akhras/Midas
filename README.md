@@ -115,7 +115,9 @@ URL; unverifiable material lands in an explicit `unverified` list
   bull and bear with different providers, but fall-through once put both
   cases on the same model for twenty runs. The committee now reads which
   provider actually produced each case from the router's decision record
-  and refuses the run if they match (`committee.provider_collision`).
+  and refuses the run if they match (`committee.provider_collision`). A
+  single-provider setup can switch the refusal off; the collision is
+  recorded either way.
 - **Verdicts are checked against the live quote.** Entry zone within 15%
   of it, stop 2 to 25% beyond the entry on the thesis side, targets beyond
   the entry. A failing verdict is re-prompted once with the problems; a

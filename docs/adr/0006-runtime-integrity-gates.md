@@ -25,8 +25,10 @@ audit trail:
   from the router's own decision record, which provider produced each
   accepted answer. If they match, the run is refused with a
   `committee.provider_collision` event and no further spend. The routing
-  test stays as a cheap first line; `REQUIRE_CASE_PROVIDER_DIVERSITY`
-  allows a deliberate single-provider setup.
+  test stays as a cheap first line. `REQUIRE_CASE_PROVIDER_DIVERSITY=false`
+  allows a deliberate single-provider setup: the collision event is still
+  written, with `refused: false`, so the ledger never reads a one-model
+  debate as a two-model one.
 - **Verdict sanity.** `midas.risk.verdict_checks` compares a trade
   verdict with the live quote: entry zone within 15% of it, stop 2 to 25%
   beyond the entry on the thesis side, targets beyond the entry. A failure
