@@ -1,5 +1,6 @@
 """Operational models: cost ledger, model-call archive, audit trail,
 approvals. All append-only by convention (no update/delete paths exist)."""
+
 import enum
 import uuid
 from typing import Any

@@ -1,6 +1,7 @@
 """End-to-end: demo-mode committee run -> thesis -> approval -> paper fill
 -> monitor re-evaluation -> exit -> outcome scoring. The demo provider runs
 the SAME code path as production (tool loop, snapshots, schemas)."""
+
 import pytest
 from sqlalchemy import select
 
@@ -48,11 +49,17 @@ def test_full_committee_run_produces_audited_thesis(factory, demo_router):
     with factory() as db:
         # every stage left an artifact
         types = {a.artifact_type for a in db.scalars(select(ResearchArtifact))}
-        assert {ArtifactType.fundamentals, ArtifactType.dossier,
-                ArtifactType.catalysts, ArtifactType.triage,
-                ArtifactType.bull_case, ArtifactType.bear_case,
-                ArtifactType.structure, ArtifactType.risk_check,
-                ArtifactType.verdict} <= types
+        assert {
+            ArtifactType.fundamentals,
+            ArtifactType.dossier,
+            ArtifactType.catalysts,
+            ArtifactType.triage,
+            ArtifactType.bull_case,
+            ArtifactType.bear_case,
+            ArtifactType.structure,
+            ArtifactType.risk_check,
+            ArtifactType.verdict,
+        } <= types
         # provenance: tool snapshots exist and research snapshots are
         # stamped with the artifact that consumed them
         snaps = db.scalars(select(DataSnapshot)).all()
@@ -64,16 +71,18 @@ def test_full_committee_run_produces_audited_thesis(factory, demo_router):
         assert thesis.status == ThesisStatus.proposed
         assert thesis.stop_price < thesis.entry_zone_low  # bullish sanity
         assert thesis.invalidators
-        approval = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.status == ApprovalStatus.pending))
+        approval = db.scalar(
+            select(ApprovalRequest).where(ApprovalRequest.status == ApprovalStatus.pending)
+        )
         assert approval is not None and approval.blocking
 
 
 def test_approval_executes_on_paper_and_monitor_reviews(factory, demo_router):
     result = run_committee(factory, demo_router, "ACME")
     with factory() as db:
-        approval = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.status == ApprovalStatus.pending))
+        approval = db.scalar(
+            select(ApprovalRequest).where(ApprovalRequest.status == ApprovalStatus.pending)
+        )
         executor.resolve_approval(db, approval, approve=True)
         db.commit()
 
@@ -95,8 +104,11 @@ def test_approval_executes_on_paper_and_monitor_reviews(factory, demo_router):
     assert summary["reviewed"] and summary["reviewed"][0]["decision"] == "hold"
 
     with factory() as db:
-        reeval = db.scalar(select(ResearchArtifact).where(
-            ResearchArtifact.artifact_type == ArtifactType.reevaluation))
+        reeval = db.scalar(
+            select(ResearchArtifact).where(
+                ResearchArtifact.artifact_type == ArtifactType.reevaluation
+            )
+        )
         assert reeval is not None
         position = db.scalar(select(Position))
         assert position.next_review_at is not None  # rescheduled
@@ -105,8 +117,9 @@ def test_approval_executes_on_paper_and_monitor_reviews(factory, demo_router):
 def test_exit_flow_scores_outcome(factory, demo_router):
     run_committee(factory, demo_router, "ACME")
     with factory() as db:
-        approval = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.status == ApprovalStatus.pending))
+        approval = db.scalar(
+            select(ApprovalRequest).where(ApprovalRequest.status == ApprovalStatus.pending)
+        )
         executor.resolve_approval(db, approval, approve=True)
         db.commit()
 
@@ -114,7 +127,8 @@ def test_exit_flow_scores_outcome(factory, demo_router):
         position = db.scalar(select(Position))
         # L0: an exit decision becomes a blocking approval, not an order
         req = executor.propose_or_execute_exit(
-            db, position, decision="exit", reasons=["thesis invalidated"])
+            db, position, decision="exit", reasons=["thesis invalidated"]
+        )
         assert isinstance(req, ApprovalRequest)
         executor.resolve_approval(db, req, approve=True)
         db.commit()
@@ -136,8 +150,7 @@ def test_resume_skips_completed_stages(factory, demo_router):
     with factory() as db:
         artifact_count = len(db.scalars(select(ResearchArtifact)).all())
     # resuming the same run must not duplicate artifacts
-    result2 = run_committee(factory, demo_router, "ACME",
-                            resume_run_id=result.run_id)
+    result2 = run_committee(factory, demo_router, "ACME", resume_run_id=result.run_id)
     with factory() as db:
         assert len(db.scalars(select(ResearchArtifact)).all()) == artifact_count
     assert result2.run_id == result.run_id
@@ -148,9 +161,16 @@ def test_floor_gate_rejects_penny_ticker(factory, demo_router):
     assert result.status == RunStatus.done
     assert "floors" in result.note
     with factory() as db:
-        triage = db.scalar(select(ResearchArtifact).where(
-            ResearchArtifact.artifact_type == ArtifactType.triage))
+        triage = db.scalar(
+            select(ResearchArtifact).where(ResearchArtifact.artifact_type == ArtifactType.triage)
+        )
         assert triage.content["passable"] is False
         # no expensive research ran
-        assert db.scalar(select(ResearchArtifact).where(
-            ResearchArtifact.artifact_type == ArtifactType.dossier)) is None
+        assert (
+            db.scalar(
+                select(ResearchArtifact).where(
+                    ResearchArtifact.artifact_type == ArtifactType.dossier
+                )
+            )
+            is None
+        )

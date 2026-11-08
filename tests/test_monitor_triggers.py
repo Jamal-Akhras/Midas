@@ -1,5 +1,6 @@
 """Scheduler triggers: earnings proximity, DTE decay, invalidation,
 cooldowns - and the digest."""
+
 from datetime import date, timedelta
 
 import pytest
@@ -32,8 +33,9 @@ def demo_mode(monkeypatch):
 def open_acme_position(factory, demo_router):
     run_committee(factory, demo_router, "ACME")
     with factory() as db:
-        approval = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.status == ApprovalStatus.pending))
+        approval = db.scalar(
+            select(ApprovalRequest).where(ApprovalRequest.status == ApprovalStatus.pending)
+        )
         executor.resolve_approval(db, approval, approve=True)
         db.commit()
 
@@ -57,13 +59,16 @@ def test_earnings_trigger_beats_schedule(factory, demo_router):
         run = PipelineRun(kind=RunKind.committee, ticker="ACME")
         db.add(run)
         db.flush()
-        db.add(ResearchArtifact(
-            run_id=run.id, ticker="ACME", agent_slug="catalyst",
-            artifact_type=ArtifactType.catalysts,
-            content={"upcoming_earnings_date":
-                     (date.today() + timedelta(days=3)).isoformat()},
-            created_at=utcnow() + timedelta(minutes=1),  # strictly newest
-        ))
+        db.add(
+            ResearchArtifact(
+                run_id=run.id,
+                ticker="ACME",
+                agent_slug="catalyst",
+                artifact_type=ArtifactType.catalysts,
+                content={"upcoming_earnings_date": (date.today() + timedelta(days=3)).isoformat()},
+                created_at=utcnow() + timedelta(minutes=1),  # strictly newest
+            )
+        )
         db.commit()
         due = due_positions(db)
         assert due and due[0][1] == CheckpointTrigger.earnings
@@ -79,13 +84,16 @@ def test_earnings_cooldown_after_review(factory, demo_router):
         run = PipelineRun(kind=RunKind.committee, ticker="ACME")
         db.add(run)
         db.flush()
-        db.add(ResearchArtifact(
-            run_id=run.id, ticker="ACME", agent_slug="catalyst",
-            artifact_type=ArtifactType.catalysts,
-            content={"upcoming_earnings_date":
-                     (date.today() + timedelta(days=3)).isoformat()},
-            created_at=utcnow() + timedelta(minutes=1),
-        ))
+        db.add(
+            ResearchArtifact(
+                run_id=run.id,
+                ticker="ACME",
+                agent_slug="catalyst",
+                artifact_type=ArtifactType.catalysts,
+                content={"upcoming_earnings_date": (date.today() + timedelta(days=3)).isoformat()},
+                created_at=utcnow() + timedelta(minutes=1),
+            )
+        )
         db.commit()
         assert due_positions(db) == []  # cooldown holds; invalidation would still fire
 
@@ -95,8 +103,10 @@ def test_dte_trigger_for_decaying_option(factory, demo_router):
     with factory() as db:
         p = db.scalar(select(Position))
         p.next_review_at = utcnow() + timedelta(days=5)
-        p.option_detail = {**p.option_detail,
-                           "expiry": (date.today() + timedelta(days=6)).isoformat()}
+        p.option_detail = {
+            **p.option_detail,
+            "expiry": (date.today() + timedelta(days=6)).isoformat(),
+        }
         db.commit()
         due = due_positions(db)
         assert due and due[0][1] == CheckpointTrigger.dte

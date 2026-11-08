@@ -5,6 +5,7 @@ New vs the parent platform: tool calling. Providers accept a generic message
 list and tool specs; they return either final text or tool_calls. The router
 owns the loop, tool execution, snapshots, and cost logging.
 """
+
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -27,7 +28,7 @@ class ToolCall:
 class ModelResponse:
     provider: str
     model: str
-    text: str                      # final text ("" if tool_calls present)
+    text: str  # final text ("" if tool_calls present)
     tool_calls: list[ToolCall] = field(default_factory=list)
     tokens_in: int = 0
     tokens_out: int = 0

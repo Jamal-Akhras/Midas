@@ -1,5 +1,6 @@
 """The tool loop: snapshots recorded before the model sees results, tool
 errors surfaced as data, every intermediate call cost-logged."""
+
 import json
 
 from pydantic import BaseModel
@@ -28,10 +29,12 @@ def make_tools():
         raise ToolError("data source down")
 
     return {
-        "get_price": Tool("get_price", "price", params({"ticker": {"type": "string"}},
-                                                       ["ticker"]), ok_tool),
-        "get_broken": Tool("get_broken", "broken", params({"ticker": {"type": "string"}},
-                                                          ["ticker"]), broken_tool),
+        "get_price": Tool(
+            "get_price", "price", params({"ticker": {"type": "string"}}, ["ticker"]), ok_tool
+        ),
+        "get_broken": Tool(
+            "get_broken", "broken", params({"ticker": {"type": "string"}}, ["ticker"]), broken_tool
+        ),
     }
 
 
@@ -44,16 +47,23 @@ def run_with_script(db, script):
     provider = FakeProvider("openai", script)
     router = ModelRouter(providers={"openai": provider})
     out = router.run(
-        db, task_type="triage", output_schema=Out, system_prompt="s",
-        user_prompt="u", tools=[t.spec() for t in tools.values()],
-        tool_executor=ctx.executor(tools), run_id=run.id, agent_slug="tester",
+        db,
+        task_type="triage",
+        output_schema=Out,
+        system_prompt="s",
+        user_prompt="u",
+        tools=[t.spec() for t in tools.values()],
+        tool_executor=ctx.executor(tools),
+        run_id=run.id,
+        agent_slug="tester",
     )
     return out, provider, ctx, run
 
 
 def test_tool_results_are_snapshotted(db):
     out, provider, ctx, run = run_with_script(
-        db, [[("get_price", {"ticker": "ACME"})], "ok, done", GOOD])
+        db, [[("get_price", {"ticker": "ACME"})], "ok, done", GOOD]
+    )
     assert out.summary == "done"
     snaps = db.scalars(select(DataSnapshot)).all()
     assert len(snaps) == 1
@@ -67,7 +77,8 @@ def test_tool_results_are_snapshotted(db):
 
 def test_tool_failure_is_data_not_crash(db):
     out, provider, ctx, run = run_with_script(
-        db, [[("get_broken", {"ticker": "ACME"})], "understood", GOOD])
+        db, [[("get_broken", {"ticker": "ACME"})], "understood", GOOD]
+    )
     assert out.summary == "done"
     snap = db.scalars(select(DataSnapshot)).one()
     assert snap.ok is False and "data source down" in snap.error
@@ -87,9 +98,15 @@ def test_artifact_stamping_links_snapshots(db):
     from midas.models import ArtifactType, ResearchArtifact
 
     out, provider, ctx, run = run_with_script(
-        db, [[("get_price", {"ticker": "ACME"})], "done", GOOD])
-    art = ResearchArtifact(run_id=run.id, ticker="ACME", agent_slug="tester",
-                           artifact_type=ArtifactType.fundamentals, content={})
+        db, [[("get_price", {"ticker": "ACME"})], "done", GOOD]
+    )
+    art = ResearchArtifact(
+        run_id=run.id,
+        ticker="ACME",
+        agent_slug="tester",
+        artifact_type=ArtifactType.fundamentals,
+        content={},
+    )
     db.add(art)
     db.flush()
     ctx.stamp_artifact(art.id)

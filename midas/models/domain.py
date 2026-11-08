@@ -5,6 +5,7 @@ snapshots link to the artifact that consumed them, theses link to their run,
 orders link to their thesis, outcomes link position+thesis. "Why did we
 enter/exit this" must be answerable months later from these tables alone.
 """
+
 import enum
 import uuid
 from datetime import date, datetime
@@ -92,7 +93,9 @@ class ResearchArtifact(PKMixin, TimestampMixin, Base):
 
     __tablename__ = "research_artifacts"
 
-    run_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pipeline_runs.id"), nullable=False, index=True)
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("pipeline_runs.id"), nullable=False, index=True
+    )
     ticker: Mapped[str] = mapped_column(String(12), default="", index=True)
     agent_slug: Mapped[str] = mapped_column(String(50))
     artifact_type: Mapped[ArtifactType] = mapped_column(_enum(ArtifactType), index=True)
@@ -119,7 +122,9 @@ class DataSnapshot(PKMixin, TimestampMixin, Base):
     tool_name: Mapped[str] = mapped_column(String(60), index=True)
     params: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     data: Mapped[Any] = mapped_column(JSON, default=dict)
-    source: Mapped[str] = mapped_column(String(30))  # alpaca|yfinance|edgar|finnhub|fmp|brave|tavily|web|demo
+    source: Mapped[str] = mapped_column(
+        String(30)
+    )  # alpaca|yfinance|edgar|finnhub|fmp|brave|tavily|web|demo
     retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ok: Mapped[bool] = mapped_column(Boolean, default=True)
     error: Mapped[str] = mapped_column(Text, default="")
@@ -156,7 +161,7 @@ class TradeThesis(PKMixin, TimestampMixin, Base):
     instrument: Mapped[Instrument] = mapped_column(_enum(Instrument))
     entry_zone_low: Mapped[float] = mapped_column(Float)
     entry_zone_high: Mapped[float] = mapped_column(Float)
-    stop_price: Mapped[float] = mapped_column(Float)          # invalidation level on the underlying
+    stop_price: Mapped[float] = mapped_column(Float)  # invalidation level on the underlying
     targets: Mapped[list[Any]] = mapped_column(JSON, default=list)
     thesis_summary: Mapped[str] = mapped_column(Text, default="")
     invalidators: Mapped[list[Any]] = mapped_column(JSON, default=list)
@@ -191,13 +196,15 @@ class OptionStructure(PKMixin, TimestampMixin, Base):
     long_strike: Mapped[float] = mapped_column(Float)
     short_strike: Mapped[float | None] = mapped_column(Float)  # spreads only
     est_premium_per_contract: Mapped[float] = mapped_column(Float)  # debit, per contract (x100)
-    contracts: Mapped[int] = mapped_column(Integer, default=0)      # set by risk sizing
+    contracts: Mapped[int] = mapped_column(Integer, default=0)  # set by risk sizing
     liquidity: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    checks: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # named check -> pass/fail + value
+    checks: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict
+    )  # named check -> pass/fail + value
 
 
 class Broker(str, enum.Enum):
-    paper_sim = "paper_sim"      # built-in simulator
+    paper_sim = "paper_sim"  # built-in simulator
     alpaca_paper = "alpaca_paper"
     # There is deliberately no real-money broker value. Adding one is the
     # L3 gate and requires the statistical bar in config.L3_BAR.
@@ -234,14 +241,18 @@ class Order(PKMixin, TimestampMixin, Base):
     side: Mapped[OrderSide] = mapped_column(_enum(OrderSide))
     instrument: Mapped[Instrument] = mapped_column(_enum(Instrument))
     symbol: Mapped[str] = mapped_column(String(32))  # ticker or OCC option symbol
-    qty: Mapped[float] = mapped_column(Float)        # shares or contracts
+    qty: Mapped[float] = mapped_column(Float)  # shares or contracts
     limit_price: Mapped[float | None] = mapped_column(Float)
     reason: Mapped[OrderReason] = mapped_column(_enum(OrderReason))
     status: Mapped[OrderStatus] = mapped_column(_enum(OrderStatus), default=OrderStatus.proposed)
-    approved_by: Mapped[str] = mapped_column(String(30), default="")  # "operator" | "investor_agent(L1/L2)"
+    approved_by: Mapped[str] = mapped_column(
+        String(30), default=""
+    )  # "operator" | "investor_agent(L1/L2)"
     filled_price: Mapped[float | None] = mapped_column(Float)
     filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    risk_check: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # execution-time re-check record
+    risk_check: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict
+    )  # execution-time re-check record
     alpaca_order_id: Mapped[str] = mapped_column(String(64), default="")
     fees_usd: Mapped[float] = mapped_column(Float, default=0.0)
     error: Mapped[str] = mapped_column(Text, default="")
@@ -263,8 +274,12 @@ class Position(PKMixin, TimestampMixin, Base):
     qty: Mapped[float] = mapped_column(Float)
     avg_price: Mapped[float] = mapped_column(Float)
     stop_price: Mapped[float] = mapped_column(Float, default=0.0)
-    option_detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # expiry/strike/type for options
-    status: Mapped[PositionStatus] = mapped_column(_enum(PositionStatus), default=PositionStatus.open)
+    option_detail: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict
+    )  # expiry/strike/type for options
+    status: Mapped[PositionStatus] = mapped_column(
+        _enum(PositionStatus), default=PositionStatus.open
+    )
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     realized_pnl_usd: Mapped[float] = mapped_column(Float, default=0.0)
@@ -281,6 +296,7 @@ class ScreenCandidate(PKMixin, TimestampMixin, Base):
     """Counterfactual ledger: EVERY screened candidate, whether or not it
     got a committee. Forward returns filled in later - so 'does the
     committee beat the screener?' has data instead of vibes."""
+
     __tablename__ = "screen_candidates"
 
     run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("pipeline_runs.id"))
@@ -295,10 +311,12 @@ class StandingStop(PKMixin, TimestampMixin, Base):
     """A GTC stop-loss order resting at the REAL Alpaca paper account so
     the stop holds even when the monitor process is down. One per open
     shares position; ratchets replace it when the effective stop moves."""
+
     __tablename__ = "standing_stops"
 
     position_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("positions.id"), nullable=False, index=True)
+        ForeignKey("positions.id"), nullable=False, index=True
+    )
     alpaca_order_id: Mapped[str] = mapped_column(String(64), default="")
     stop_price: Mapped[float] = mapped_column(Float, default=0.0)
     qty: Mapped[float] = mapped_column(Float, default=0.0)
@@ -323,10 +341,14 @@ class CheckpointStatus(str, enum.Enum):
 class ReviewCheckpoint(PKMixin, TimestampMixin, Base):
     __tablename__ = "review_checkpoints"
 
-    position_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("positions.id"), nullable=False, index=True)
+    position_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("positions.id"), nullable=False, index=True
+    )
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     trigger: Mapped[CheckpointTrigger] = mapped_column(_enum(CheckpointTrigger))
-    status: Mapped[CheckpointStatus] = mapped_column(_enum(CheckpointStatus), default=CheckpointStatus.pending)
+    status: Mapped[CheckpointStatus] = mapped_column(
+        _enum(CheckpointStatus), default=CheckpointStatus.pending
+    )
     decision: Mapped[str] = mapped_column(String(20), default="")  # hold|trim|exit|roll
     artifact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("research_artifacts.id"))
     notes: Mapped[str] = mapped_column(Text, default="")
@@ -338,7 +360,9 @@ class TradeOutcome(PKMixin, TimestampMixin, Base):
 
     __tablename__ = "trade_outcomes"
 
-    position_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("positions.id"), nullable=False, unique=True)
+    position_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("positions.id"), nullable=False, unique=True
+    )
     thesis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("trade_theses.id"), nullable=False)
     pnl_usd: Mapped[float] = mapped_column(Float)
     pnl_pct: Mapped[float] = mapped_column(Float)

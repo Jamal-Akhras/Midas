@@ -1,5 +1,6 @@
 """Self-funding metric, gate-before-deep-research ordering, and the
 auto-cycle cadence."""
+
 from datetime import timedelta
 
 import pytest
@@ -37,24 +38,49 @@ def _outcome(db, pnl, days_ago=0):
     run = PipelineRun(kind=RunKind.committee, ticker="ACME")
     db.add(run)
     db.flush()
-    art = ResearchArtifact(run_id=run.id, ticker="ACME", agent_slug="investor",
-                           artifact_type=ArtifactType.verdict, content={})
+    art = ResearchArtifact(
+        run_id=run.id,
+        ticker="ACME",
+        agent_slug="investor",
+        artifact_type=ArtifactType.verdict,
+        content={},
+    )
     db.add(art)
     db.flush()
-    thesis = TradeThesis(run_id=run.id, verdict_artifact_id=art.id, ticker="ACME",
-                         direction=Direction.bullish, instrument=Instrument.shares,
-                         entry_zone_low=99, entry_zone_high=101, stop_price=95,
-                         status=ThesisStatus.closed)
+    thesis = TradeThesis(
+        run_id=run.id,
+        verdict_artifact_id=art.id,
+        ticker="ACME",
+        direction=Direction.bullish,
+        instrument=Instrument.shares,
+        entry_zone_low=99,
+        entry_zone_high=101,
+        stop_price=95,
+        status=ThesisStatus.closed,
+    )
     db.add(thesis)
     db.flush()
-    p = Position(thesis_id=thesis.id, ticker="ACME", symbol="ACME",
-                 instrument=Instrument.shares, qty=0, avg_price=100,
-                 status=PositionStatus.closed, opened_at=utcnow(),
-                 closed_at=utcnow())
+    p = Position(
+        thesis_id=thesis.id,
+        ticker="ACME",
+        symbol="ACME",
+        instrument=Instrument.shares,
+        qty=0,
+        avg_price=100,
+        status=PositionStatus.closed,
+        opened_at=utcnow(),
+        closed_at=utcnow(),
+    )
     db.add(p)
     db.flush()
-    o = TradeOutcome(position_id=p.id, thesis_id=thesis.id, pnl_usd=pnl,
-                     pnl_pct=pnl, holding_days=1, exit_kind="manual")
+    o = TradeOutcome(
+        position_id=p.id,
+        thesis_id=thesis.id,
+        pnl_usd=pnl,
+        pnl_pct=pnl,
+        holding_days=1,
+        exit_kind="manual",
+    )
     db.add(o)
     db.flush()
     o.created_at = utcnow() - timedelta(days=days_ago)
@@ -65,7 +91,7 @@ def _outcome(db, pnl, days_ago=0):
 def test_self_funding_ratio_and_window(db):
     db.add(CostEvent(provider="demo", model="m", cost_usd=2.0))
     db.flush()
-    _outcome(db, pnl=10.0)              # inside the 30d window
+    _outcome(db, pnl=10.0)  # inside the 30d window
     _outcome(db, pnl=999.0, days_ago=45)  # outside - must not count
     s = stats(db)["self_funding"]
     assert s["realized_pnl_30d"] == 10.0
@@ -91,12 +117,14 @@ def test_no_spend_means_no_ratio(db):
 def test_gate_runs_before_deep_research(factory, demo_router):
     run_committee(factory, demo_router, "ACME")
     with factory() as db:
+
         def created(at):
-            art = db.scalar(select(ResearchArtifact).where(
-                ResearchArtifact.artifact_type == at))
+            art = db.scalar(select(ResearchArtifact).where(ResearchArtifact.artifact_type == at))
             return aware(art.created_at)
-        assert created(ArtifactType.triage) < created(ArtifactType.dossier), \
+
+        assert created(ArtifactType.triage) < created(ArtifactType.dossier), (
             "the cheap gate must run before the expensive dossier"
+        )
 
 
 def test_auto_cycle_runs_once_per_configured_day(factory, demo_router, monkeypatch):

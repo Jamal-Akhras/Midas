@@ -6,6 +6,7 @@ reviewing outcome stats - never something the system grants itself.
 Levels above 2 are rejected here on purpose: the real-money code path does
 not exist in this codebase yet (non-negotiable #1).
 """
+
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,8 +25,7 @@ L3_BAR = {
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore",
-                                      validate_assignment=True)
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", validate_assignment=True)
 
     database_url: str = "sqlite:///midas.db"
 
@@ -38,10 +38,15 @@ class Settings(BaseSettings):
     # --- data / tool providers (all free tiers; empty => demo fixtures) ---
     # Accepts Alpaca's own dashboard naming too (ALPACA_PAPER_KEY_ID /
     # ALPACA_PAPER_SECRET) so keys can be pasted as-is.
-    alpaca_api_key: str = Field("", validation_alias=AliasChoices(
-        "alpaca_api_key", "ALPACA_API_KEY", "ALPACA_PAPER_KEY_ID"))
-    alpaca_api_secret: str = Field("", validation_alias=AliasChoices(
-        "alpaca_api_secret", "ALPACA_API_SECRET", "ALPACA_PAPER_SECRET"))
+    alpaca_api_key: str = Field(
+        "", validation_alias=AliasChoices("alpaca_api_key", "ALPACA_API_KEY", "ALPACA_PAPER_KEY_ID")
+    )
+    alpaca_api_secret: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "alpaca_api_secret", "ALPACA_API_SECRET", "ALPACA_PAPER_SECRET"
+        ),
+    )
     alpaca_paper_base_url: str = "https://paper-api.alpaca.markets"
     alpaca_data_base_url: str = "https://data.alpaca.markets"
     # Mirror equity paper orders to the real Alpaca paper account (real
@@ -59,7 +64,7 @@ class Settings(BaseSettings):
     autonomy_level: int = 0
 
     # --- risk caps (enforced in code at recommendation AND execution) ---
-    per_trade_risk_pct: float = 1.0          # max % of account risked per trade
+    per_trade_risk_pct: float = 1.0  # max % of account risked per trade
     # Gap protection: stop-based sizing assumes stops hold; an overnight gap
     # through the stop loses (gap/notional), so notional itself is capped.
     max_notional_pct_per_trade: float = 15.0
@@ -109,17 +114,17 @@ class Settings(BaseSettings):
     deep_scan_enabled: bool = True
     deep_scan_min_price: float = 5.0
     deep_scan_min_dollar_volume: float = 20_000_000.0
-    deep_scan_max_bars: int = 150   # survivors that get full bar analysis
-    deep_scan_keep: int = 15        # setups handed to the LLM screener
+    deep_scan_max_bars: int = 150  # survivors that get full bar analysis
+    deep_scan_keep: int = 15  # setups handed to the LLM screener
     # Option fill friction for SIMULATOR fills (broker fills are real): pay
     # through the mid by this % on entry, give it up on exit, plus fees.
     option_slippage_pct: float = 1.0
     option_fee_per_contract: float = 0.65
     # Correlated-dollar cap: max notional per sector as % of equity
     max_sector_notional_pct: float = 35.0
-    max_premium_pct_per_trade: float = 2.0   # max option premium per trade, % of account
-    max_total_premium_pct: float = 10.0      # max total open option premium, % of account
-    daily_loss_limit_pct: float = 3.0        # realized+unrealized; halts pipeline
+    max_premium_pct_per_trade: float = 2.0  # max option premium per trade, % of account
+    max_total_premium_pct: float = 10.0  # max total open option premium, % of account
+    daily_loss_limit_pct: float = 3.0  # realized+unrealized; halts pipeline
     weekly_loss_limit_pct: float = 6.0
     max_open_positions: int = 8
     max_positions_per_sector: int = 3
@@ -127,18 +132,18 @@ class Settings(BaseSettings):
     preferred_dte_min: int = 30
     preferred_dte_max: int = 60
     min_open_interest: int = 200
-    max_bid_ask_spread_pct: float = 10.0     # (ask-bid)/mid * 100
-    min_price_usd: float = 5.0               # screener floor: no penny stocks
+    max_bid_ask_spread_pct: float = 10.0  # (ask-bid)/mid * 100
+    min_price_usd: float = 5.0  # screener floor: no penny stocks
     min_avg_daily_volume: int = 1_000_000
 
     # --- AI spend ---
-    daily_spend_limit_usd: float = 10.0      # hard ceiling per UTC day; <=0 disables
-    per_stage_cost_ceiling_usd: float = 0.60 # max spend for one agent stage
+    daily_spend_limit_usd: float = 10.0  # hard ceiling per UTC day; <=0 disables
+    per_stage_cost_ceiling_usd: float = 0.60  # max spend for one agent stage
 
     # --- scheduling ---
-    reeval_hour_utc: int = 21                # daily post-close re-evaluation (US close 20/21 UTC)
-    earnings_lookahead_days: int = 7         # event trigger window
-    dte_exit_review_threshold: int = 10      # options with fewer DTE get flagged every review
+    reeval_hour_utc: int = 21  # daily post-close re-evaluation (US close 20/21 UTC)
+    earnings_lookahead_days: int = 7  # event trigger window
+    dte_exit_review_threshold: int = 10  # options with fewer DTE get flagged every review
 
     # --- autopilot cadence (budget-aware) ---
     # Comma-separated weekdays (mon,tue,...) when the monitor auto-runs a
@@ -149,8 +154,8 @@ class Settings(BaseSettings):
     auto_cycle_max_committees: int = 4
 
     # --- screener universe ---
-    universe: str = "demo"                   # "demo", "sp500", or comma-separated tickers
-    watchlist: str = ""                      # extra comma-separated tickers
+    universe: str = "demo"  # "demo", "sp500", or comma-separated tickers
+    watchlist: str = ""  # extra comma-separated tickers
 
     @field_validator("autonomy_level")
     @classmethod
@@ -186,48 +191,228 @@ settings = Settings()
 # ---------------------------------------------------------------------------
 EDITABLE_SETTINGS: dict[str, dict] = {
     # universe & cadence
-    "UNIVERSE":                 {"attr": "universe", "type": "str", "group": "universe", "fingerprint": True},
-    "WATCHLIST":                {"attr": "watchlist", "type": "str", "group": "universe", "fingerprint": False},
-    "AUTO_CYCLE_WEEKDAYS":      {"attr": "auto_cycle_weekdays", "type": "str", "group": "universe", "fingerprint": False},
-    "AUTO_CYCLE_MAX_COMMITTEES": {"attr": "auto_cycle_max_committees", "type": "int", "group": "universe", "fingerprint": True},
-    "AUTO_CYCLE_MARKET_HOURS_ONLY": {"attr": "auto_cycle_market_hours_only", "type": "bool", "group": "universe", "fingerprint": False},
-    "DISCOVERY_ENABLED":        {"attr": "discovery_enabled", "type": "bool", "group": "universe", "fingerprint": False},
-    "DISCOVERY_TOP":            {"attr": "discovery_top", "type": "int", "group": "universe", "fingerprint": False},
-    "PREMARKET_GAP_ALERT_PCT":  {"attr": "premarket_gap_alert_pct", "type": "float", "group": "universe", "fingerprint": False},
+    "UNIVERSE": {"attr": "universe", "type": "str", "group": "universe", "fingerprint": True},
+    "WATCHLIST": {"attr": "watchlist", "type": "str", "group": "universe", "fingerprint": False},
+    "AUTO_CYCLE_WEEKDAYS": {
+        "attr": "auto_cycle_weekdays",
+        "type": "str",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "AUTO_CYCLE_MAX_COMMITTEES": {
+        "attr": "auto_cycle_max_committees",
+        "type": "int",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "AUTO_CYCLE_MARKET_HOURS_ONLY": {
+        "attr": "auto_cycle_market_hours_only",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "DISCOVERY_ENABLED": {
+        "attr": "discovery_enabled",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "DISCOVERY_TOP": {
+        "attr": "discovery_top",
+        "type": "int",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "PREMARKET_GAP_ALERT_PCT": {
+        "attr": "premarket_gap_alert_pct",
+        "type": "float",
+        "group": "universe",
+        "fingerprint": False,
+    },
     # autonomy & spend
-    "AUTONOMY_LEVEL":           {"attr": "autonomy_level", "type": "int", "group": "autonomy", "fingerprint": False},
-    "DAILY_SPEND_LIMIT_USD":    {"attr": "daily_spend_limit_usd", "type": "float", "group": "autonomy", "fingerprint": False},
+    "AUTONOMY_LEVEL": {
+        "attr": "autonomy_level",
+        "type": "int",
+        "group": "autonomy",
+        "fingerprint": False,
+    },
+    "DAILY_SPEND_LIMIT_USD": {
+        "attr": "daily_spend_limit_usd",
+        "type": "float",
+        "group": "autonomy",
+        "fingerprint": False,
+    },
     # risk (all strategy-defining)
-    "PER_TRADE_RISK_PCT":       {"attr": "per_trade_risk_pct", "type": "float", "group": "risk", "fingerprint": True},
-    "MAX_NOTIONAL_PCT_PER_TRADE": {"attr": "max_notional_pct_per_trade", "type": "float", "group": "risk", "fingerprint": True},
-    "MAX_TOTAL_NOTIONAL_PCT":   {"attr": "max_total_notional_pct", "type": "float", "group": "risk", "fingerprint": True},
-    "MAX_SECTOR_NOTIONAL_PCT":  {"attr": "max_sector_notional_pct", "type": "float", "group": "risk", "fingerprint": True},
-    "MAX_OPEN_POSITIONS":       {"attr": "max_open_positions", "type": "int", "group": "risk", "fingerprint": True},
-    "MAX_POSITIONS_PER_SECTOR": {"attr": "max_positions_per_sector", "type": "int", "group": "risk", "fingerprint": True},
-    "DAILY_LOSS_LIMIT_PCT":     {"attr": "daily_loss_limit_pct", "type": "float", "group": "risk", "fingerprint": True},
-    "WEEKLY_LOSS_LIMIT_PCT":    {"attr": "weekly_loss_limit_pct", "type": "float", "group": "risk", "fingerprint": True},
-    "MAX_HOLDING_DAYS":         {"attr": "max_holding_days", "type": "int", "group": "risk", "fingerprint": True},
-    "BREAKEVEN_AT_R":           {"attr": "breakeven_at_r", "type": "float", "group": "risk", "fingerprint": True},
-    "TRAIL_LOOKBACK_DAYS":      {"attr": "trail_lookback_days", "type": "int", "group": "risk", "fingerprint": True},
+    "PER_TRADE_RISK_PCT": {
+        "attr": "per_trade_risk_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_NOTIONAL_PCT_PER_TRADE": {
+        "attr": "max_notional_pct_per_trade",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_TOTAL_NOTIONAL_PCT": {
+        "attr": "max_total_notional_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_SECTOR_NOTIONAL_PCT": {
+        "attr": "max_sector_notional_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_OPEN_POSITIONS": {
+        "attr": "max_open_positions",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_POSITIONS_PER_SECTOR": {
+        "attr": "max_positions_per_sector",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "DAILY_LOSS_LIMIT_PCT": {
+        "attr": "daily_loss_limit_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "WEEKLY_LOSS_LIMIT_PCT": {
+        "attr": "weekly_loss_limit_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MAX_HOLDING_DAYS": {
+        "attr": "max_holding_days",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "BREAKEVEN_AT_R": {
+        "attr": "breakeven_at_r",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "TRAIL_LOOKBACK_DAYS": {
+        "attr": "trail_lookback_days",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
     # options
-    "MIN_DTE_AT_ENTRY":         {"attr": "min_dte_at_entry", "type": "int", "group": "options", "fingerprint": True},
-    "MIN_OPEN_INTEREST":        {"attr": "min_open_interest", "type": "int", "group": "options", "fingerprint": True},
-    "MAX_BID_ASK_SPREAD_PCT":   {"attr": "max_bid_ask_spread_pct", "type": "float", "group": "options", "fingerprint": True},
-    "MAX_PREMIUM_PCT_PER_TRADE": {"attr": "max_premium_pct_per_trade", "type": "float", "group": "options", "fingerprint": True},
-    "MAX_TOTAL_PREMIUM_PCT":    {"attr": "max_total_premium_pct", "type": "float", "group": "options", "fingerprint": True},
-    "OPTION_SLIPPAGE_PCT":      {"attr": "option_slippage_pct", "type": "float", "group": "options", "fingerprint": True},
-    "OPTION_FEE_PER_CONTRACT":  {"attr": "option_fee_per_contract", "type": "float", "group": "options", "fingerprint": True},
+    "MIN_DTE_AT_ENTRY": {
+        "attr": "min_dte_at_entry",
+        "type": "int",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "MIN_OPEN_INTEREST": {
+        "attr": "min_open_interest",
+        "type": "int",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "MAX_BID_ASK_SPREAD_PCT": {
+        "attr": "max_bid_ask_spread_pct",
+        "type": "float",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "MAX_PREMIUM_PCT_PER_TRADE": {
+        "attr": "max_premium_pct_per_trade",
+        "type": "float",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "MAX_TOTAL_PREMIUM_PCT": {
+        "attr": "max_total_premium_pct",
+        "type": "float",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "OPTION_SLIPPAGE_PCT": {
+        "attr": "option_slippage_pct",
+        "type": "float",
+        "group": "options",
+        "fingerprint": True,
+    },
+    "OPTION_FEE_PER_CONTRACT": {
+        "attr": "option_fee_per_contract",
+        "type": "float",
+        "group": "options",
+        "fingerprint": True,
+    },
     # execution
-    "ALPACA_MIRROR_ORDERS":     {"attr": "alpaca_mirror_orders", "type": "bool", "group": "execution", "fingerprint": False},
-    "ALPACA_STANDING_STOPS":    {"attr": "alpaca_standing_stops", "type": "bool", "group": "execution", "fingerprint": False},
-    "REQUIRE_BROKER_FILLS":     {"attr": "require_broker_fills", "type": "bool", "group": "execution", "fingerprint": False},
-    "ALPACA_MIRROR_OPTIONS":    {"attr": "alpaca_mirror_options", "type": "bool", "group": "execution", "fingerprint": False},
-    "REGIME_FILTER_ENABLED":    {"attr": "regime_filter_enabled", "type": "bool", "group": "risk", "fingerprint": True},
-    "REGIME_THROTTLE":          {"attr": "regime_throttle", "type": "float", "group": "risk", "fingerprint": True},
-    "DEEP_SCAN_ENABLED":        {"attr": "deep_scan_enabled", "type": "bool", "group": "universe", "fingerprint": False},
-    "DEEP_SCAN_MIN_DOLLAR_VOLUME": {"attr": "deep_scan_min_dollar_volume", "type": "float", "group": "universe", "fingerprint": False},
-    "DEEP_SCAN_MAX_BARS":       {"attr": "deep_scan_max_bars", "type": "int", "group": "universe", "fingerprint": False},
-    "DEEP_SCAN_KEEP":           {"attr": "deep_scan_keep", "type": "int", "group": "universe", "fingerprint": False},
+    "ALPACA_MIRROR_ORDERS": {
+        "attr": "alpaca_mirror_orders",
+        "type": "bool",
+        "group": "execution",
+        "fingerprint": False,
+    },
+    "ALPACA_STANDING_STOPS": {
+        "attr": "alpaca_standing_stops",
+        "type": "bool",
+        "group": "execution",
+        "fingerprint": False,
+    },
+    "REQUIRE_BROKER_FILLS": {
+        "attr": "require_broker_fills",
+        "type": "bool",
+        "group": "execution",
+        "fingerprint": False,
+    },
+    "ALPACA_MIRROR_OPTIONS": {
+        "attr": "alpaca_mirror_options",
+        "type": "bool",
+        "group": "execution",
+        "fingerprint": False,
+    },
+    "REGIME_FILTER_ENABLED": {
+        "attr": "regime_filter_enabled",
+        "type": "bool",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "REGIME_THROTTLE": {
+        "attr": "regime_throttle",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "DEEP_SCAN_ENABLED": {
+        "attr": "deep_scan_enabled",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "DEEP_SCAN_MIN_DOLLAR_VOLUME": {
+        "attr": "deep_scan_min_dollar_volume",
+        "type": "float",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "DEEP_SCAN_MAX_BARS": {
+        "attr": "deep_scan_max_bars",
+        "type": "int",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    "DEEP_SCAN_KEEP": {
+        "attr": "deep_scan_keep",
+        "type": "int",
+        "group": "universe",
+        "fingerprint": False,
+    },
 }
 
 
@@ -277,8 +462,7 @@ def update_setting(env_key: str, raw_value: str, env_path=None) -> dict:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     else:
         path.write_text(line + "\n", encoding="utf-8")
-    return {"key": key, "old": old, "new": value,
-            "fingerprint": meta["fingerprint"]}
+    return {"key": key, "old": old, "new": value, "fingerprint": meta["fingerprint"]}
 
 
 def reload_settings() -> None:

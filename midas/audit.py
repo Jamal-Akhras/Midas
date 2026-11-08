@@ -1,5 +1,6 @@
 """Append-only audit writer. Every state transition goes through
 record_event(). There is intentionally no update or delete in this module."""
+
 import uuid
 from typing import Any
 

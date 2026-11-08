@@ -16,7 +16,7 @@ def test_occ_symbol_parsing():
 def test_chain_from_snapshots_builds_rows():
     from datetime import date, timedelta
 
-    expiry = (date.today() + timedelta(days=45))
+    expiry = date.today() + timedelta(days=45)
     occ = f"ORCL{expiry.strftime('%y%m%d')}C00150000"
     snapshots = {
         occ: {
@@ -42,9 +42,9 @@ def test_chain_filters_far_strikes_and_stale_expiries():
 
     near = (date.today() + timedelta(days=30)).strftime("%y%m%d")
     snapshots = {
-        f"ORCL{near}C00300000": {"latestQuote": {"bp": 1, "ap": 2}},   # +100% strike
-        f"ORCL{near}C00150000": {"latestQuote": {"bp": 1, "ap": 2}},   # keep
-        "ORCL200101C00150000": {"latestQuote": {"bp": 1, "ap": 2}},    # expired
+        f"ORCL{near}C00300000": {"latestQuote": {"bp": 1, "ap": 2}},  # +100% strike
+        f"ORCL{near}C00150000": {"latestQuote": {"bp": 1, "ap": 2}},  # keep
+        "ORCL200101C00150000": {"latestQuote": {"bp": 1, "ap": 2}},  # expired
     }
     chain = _chain_from_snapshots(snapshots, spot=150.0)
     assert len(chain) == 1
@@ -58,9 +58,14 @@ def test_mirror_disabled_without_keys(monkeypatch):
 
     monkeypatch.setattr(settings, "alpaca_api_key", "")
     monkeypatch.setattr(settings, "alpaca_api_secret", "")
-    order = Order(thesis_id=uuid.uuid4(), side=OrderSide.buy,
-                  instrument=Instrument.shares, symbol="ORCL", qty=5,
-                  reason=OrderReason.entry)
+    order = Order(
+        thesis_id=uuid.uuid4(),
+        side=OrderSide.buy,
+        instrument=Instrument.shares,
+        symbol="ORCL",
+        qty=5,
+        reason=OrderReason.entry,
+    )
     assert _mirror_to_alpaca(order) is None
 
 
@@ -72,8 +77,12 @@ def test_mirror_never_touches_options(monkeypatch):
 
     monkeypatch.setattr(settings, "alpaca_api_key", "k")
     monkeypatch.setattr(settings, "alpaca_api_secret", "s")
-    order = Order(thesis_id=uuid.uuid4(), side=OrderSide.buy,
-                  instrument=Instrument.option,
-                  symbol="ORCL_2026-09-18_call_150.0", qty=1,
-                  reason=OrderReason.entry)
+    order = Order(
+        thesis_id=uuid.uuid4(),
+        side=OrderSide.buy,
+        instrument=Instrument.option,
+        symbol="ORCL_2026-09-18_call_150.0",
+        qty=1,
+        reason=OrderReason.entry,
+    )
     assert _mirror_to_alpaca(order) is None  # options stay on the simulator

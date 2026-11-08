@@ -1,7 +1,6 @@
-
-
 def test_portfolio_review_skips_empty_book(factory, demo_router):
     from midas.scheduler.monitor import maybe_portfolio_review
+
     assert maybe_portfolio_review(factory, demo_router) is None
 
 

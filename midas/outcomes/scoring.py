@@ -1,6 +1,7 @@
 """Outcome tracking: the eval harness. Every closed position is scored
 against its thesis - P&L, which case proved right, whether invalidation
 worked as designed. Graded by the market, not by a model."""
+
 import logging
 from datetime import timedelta
 
@@ -28,8 +29,7 @@ logger = logging.getLogger(__name__)
 def score_closed_positions(db: Session) -> list[TradeOutcome]:
     """Create TradeOutcome rows for closed positions that lack one."""
     scored: list[TradeOutcome] = []
-    closed = db.scalars(select(Position).where(
-        Position.status == PositionStatus.closed)).all()
+    closed = db.scalars(select(Position).where(Position.status == PositionStatus.closed)).all()
     have = {o.position_id for o in db.scalars(select(TradeOutcome))}
     for p in closed:
         if p.id in have:
@@ -41,10 +41,12 @@ def score_closed_positions(db: Session) -> list[TradeOutcome]:
         db.flush()
         thesis.status = thesis.status  # closed theses keep their status history in audit
         record_event(
-            db, event_type="outcome.scored",
+            db,
+            event_type="outcome.scored",
             summary=f"{p.symbol}: {outcome.pnl_usd:+.2f} USD "
-                    f"({outcome.exit_kind}); bull_right={outcome.bull_case_right}",
-            subject_type="outcome", subject_id=outcome.id,
+            f"({outcome.exit_kind}); bull_right={outcome.bull_case_right}",
+            subject_type="outcome",
+            subject_id=outcome.id,
             payload={"pnl_usd": outcome.pnl_usd, "pnl_pct": outcome.pnl_pct},
         )
         scored.append(outcome)
@@ -78,9 +80,12 @@ def _score(db: Session, p: Position, thesis: TradeThesis) -> TradeOutcome:
         invalidation_worked = abs(pnl) <= invested * 1.5 if invested else None
 
     return TradeOutcome(
-        position_id=p.id, thesis_id=thesis.id,
-        pnl_usd=round(pnl, 2), pnl_pct=round(pnl_pct, 2),
-        holding_days=holding_days, exit_kind=exit_kind,
+        position_id=p.id,
+        thesis_id=thesis.id,
+        pnl_usd=round(pnl, 2),
+        pnl_pct=round(pnl_pct, 2),
+        holding_days=holding_days,
+        exit_kind=exit_kind,
         bull_case_right=bull_right if bull_art else None,
         bear_case_right=(not bull_right) if bear_art else None,
         invalidation_worked=invalidation_worked,
@@ -91,17 +96,22 @@ def _score(db: Session, p: Position, thesis: TradeThesis) -> TradeOutcome:
 def _initial_qty(db: Session, p: Position) -> float:
     from midas.models import Order, OrderSide, OrderStatus
 
-    buys = db.scalars(select(Order).where(
-        Order.position_id == p.id, Order.side == OrderSide.buy,
-        Order.status == OrderStatus.filled)).all()
+    buys = db.scalars(
+        select(Order).where(
+            Order.position_id == p.id,
+            Order.side == OrderSide.buy,
+            Order.status == OrderStatus.filled,
+        )
+    ).all()
     return sum(o.qty for o in buys) or p.qty or 1.0
 
 
 def _latest(db: Session, ticker: str, at: ArtifactType) -> ResearchArtifact | None:
-    return db.scalar(select(ResearchArtifact)
-                     .where(ResearchArtifact.ticker == ticker,
-                            ResearchArtifact.artifact_type == at)
-                     .order_by(ResearchArtifact.created_at.desc()))
+    return db.scalar(
+        select(ResearchArtifact)
+        .where(ResearchArtifact.ticker == ticker, ResearchArtifact.artifact_type == at)
+        .order_by(ResearchArtifact.created_at.desc())
+    )
 
 
 def stats(db: Session) -> dict:
@@ -128,22 +138,25 @@ def stats(db: Session) -> dict:
     from midas.models import OrderSide, OrderStatus
 
     l2row = db.get(SystemState, "l2_since")
-    l2_start = (aware(_dt.fromisoformat(l2row.value["at"]))
-                if l2row and l2row.value.get("at") else None)
+    l2_start = (
+        aware(_dt.fromisoformat(l2row.value["at"])) if l2row and l2row.value.get("at") else None
+    )
 
     brokers_by_pos: dict = {}
     buy_qty: dict = {}
     sell_qty: dict = {}
-    for od in db.scalars(select(Order).where(
-            Order.status == OrderStatus.filled,
-            Order.position_id.isnot(None))):
+    for od in db.scalars(
+        select(Order).where(Order.status == OrderStatus.filled, Order.position_id.isnot(None))
+    ):
         brokers_by_pos.setdefault(od.position_id, set()).add(od.broker)
         bucket = buy_qty if od.side == OrderSide.buy else sell_qty
         bucket[od.position_id] = bucket.get(od.position_id, 0.0) + od.qty
     pos_instrument = {p.id: p.instrument for p in db.scalars(select(Position))}
     eligible = [
-        o for o in outcomes
-        if l2_start is not None and aware(o.created_at) >= l2_start
+        o
+        for o in outcomes
+        if l2_start is not None
+        and aware(o.created_at) >= l2_start
         and pos_instrument.get(o.position_id) == Instrument.shares
         and brokers_by_pos.get(o.position_id) == {Broker.alpaca_paper}
         and buy_qty.get(o.position_id, 0.0) > 0
@@ -159,11 +172,11 @@ def stats(db: Session) -> dict:
     if n_el >= 5:  # bootstrap: probability the cohort expectancy is > 0
         pnls = [o.pnl_usd for o in eligible]
         rng = _random.Random(42)
-        hits = sum(1 for _ in range(2000)
-                   if sum(rng.choices(pnls, k=n_el)) > 0)
+        hits = sum(1 for _ in range(2000) if sum(rng.choices(pnls, k=n_el)) > 0)
         p_pos = round(hits / 2000, 3)
 
-    days_at_l2 = ((utcnow() - l2_start).days if l2_start is not None else None)
+    days_at_l2 = (utcnow() - l2_start).days if l2_start is not None else None
+
     # max drawdown: separate curves - all trades vs the eligible cohort
     # (the L3 gate must judge the cohort it counts, nothing else)
     def _max_dd(rows):
@@ -186,27 +199,34 @@ def stats(db: Session) -> dict:
     # metric for whether it EVER could.
     cutoff = utcnow() - timedelta(days=30)
     pnl_30d = sum(o.pnl_usd for o in outcomes if aware(o.created_at) >= cutoff)
-    spend_30d = sum(e.cost_usd for e in db.scalars(select(CostEvent))
-                    if aware(e.created_at) >= cutoff)
+    spend_30d = sum(
+        e.cost_usd for e in db.scalars(select(CostEvent)) if aware(e.created_at) >= cutoff
+    )
     from midas.models import ScreenCandidate
     from midas.models.domain import ThesisStatus
 
-    cands = db.scalars(select(ScreenCandidate).where(
-        ScreenCandidate.fwd_10d_pct.isnot(None))).all()
-    traded_tickers = {t.ticker for t in db.scalars(select(TradeThesis).where(
-        TradeThesis.status.in_((ThesisStatus.executed,))))}
-    traded_fwd = [c.fwd_10d_pct for c in cands
-                  if c.fwd_10d_pct is not None and c.ticker in traded_tickers]
-    skipped_fwd = [c.fwd_10d_pct for c in cands
-                   if c.fwd_10d_pct is not None and c.ticker not in traded_tickers]
+    cands = db.scalars(select(ScreenCandidate).where(ScreenCandidate.fwd_10d_pct.isnot(None))).all()
+    traded_tickers = {
+        t.ticker
+        for t in db.scalars(
+            select(TradeThesis).where(TradeThesis.status.in_((ThesisStatus.executed,)))
+        )
+    }
+    traded_fwd = [
+        c.fwd_10d_pct for c in cands if c.fwd_10d_pct is not None and c.ticker in traded_tickers
+    ]
+    skipped_fwd = [
+        c.fwd_10d_pct for c in cands if c.fwd_10d_pct is not None and c.ticker not in traded_tickers
+    ]
     counterfactual = {
         "note": "fwd returns ~10 sessions after screen; the committee must "
-                "beat the candidates it rejected",
-        "n_traded": len(traded_fwd), "n_skipped": len(skipped_fwd),
-        "avg_fwd_traded_pct": (round(sum(traded_fwd) / len(traded_fwd), 2)
-                               if traded_fwd else None),
-        "avg_fwd_skipped_pct": (round(sum(skipped_fwd) / len(skipped_fwd), 2)
-                                if skipped_fwd else None),
+        "beat the candidates it rejected",
+        "n_traded": len(traded_fwd),
+        "n_skipped": len(skipped_fwd),
+        "avg_fwd_traded_pct": (round(sum(traded_fwd) / len(traded_fwd), 2) if traded_fwd else None),
+        "avg_fwd_skipped_pct": (
+            round(sum(skipped_fwd) / len(skipped_fwd), 2) if skipped_fwd else None
+        ),
     }
 
     return {
@@ -227,8 +247,10 @@ def stats(db: Session) -> dict:
         "autonomy_level": settings.autonomy_level,
         "eligible_cohort": {
             "note": "broker-backed shares outcomes only; sim option fills excluded",
-            "n": n_el, "total_pnl_usd": round(total_el, 2),
-            "expectancy_usd": round(exp_el, 2), "profit_factor": profit_factor,
+            "n": n_el,
+            "total_pnl_usd": round(total_el, 2),
+            "expectancy_usd": round(exp_el, 2),
+            "profit_factor": profit_factor,
             "p_expectancy_positive": p_pos,
             "max_drawdown_usd": round(max_dd_el, 2),
         },
@@ -238,13 +260,15 @@ def stats(db: Session) -> dict:
             "closed_positions": n_el >= L3_BAR["min_closed_positions"],
             "positive_expectancy": n_el > 0 and exp_el > 0,
             "statistical_confidence": (
-                p_pos is not None
-                and p_pos >= L3_BAR.get("min_p_expectancy_positive", 0.9)),
-            "drawdown_inside_limit":
-                (n_el >= L3_BAR["min_closed_positions"]
-                 and (max_dd_el / STARTING_CASH * 100) <= L3_BAR["max_drawdown_pct"]),
-            "days_at_l2": (days_at_l2 is not None
-                           and days_at_l2 >= L3_BAR.get("min_days_at_l2", 30)),
+                p_pos is not None and p_pos >= L3_BAR.get("min_p_expectancy_positive", 0.9)
+            ),
+            "drawdown_inside_limit": (
+                n_el >= L3_BAR["min_closed_positions"]
+                and (max_dd_el / STARTING_CASH * 100) <= L3_BAR["max_drawdown_pct"]
+            ),
+            "days_at_l2": (
+                days_at_l2 is not None and days_at_l2 >= L3_BAR.get("min_days_at_l2", 30)
+            ),
         },
         "eligible_for_l3": bool(
             n_el >= L3_BAR["min_closed_positions"]
@@ -253,5 +277,6 @@ def stats(db: Session) -> dict:
             and p_pos >= L3_BAR.get("min_p_expectancy_positive", 0.9)
             and (max_dd_el / STARTING_CASH * 100) <= L3_BAR["max_drawdown_pct"]
             and days_at_l2 is not None
-            and days_at_l2 >= L3_BAR.get("min_days_at_l2", 30)),
+            and days_at_l2 >= L3_BAR.get("min_days_at_l2", 30)
+        ),
     }

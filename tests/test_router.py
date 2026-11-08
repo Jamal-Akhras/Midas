@@ -1,5 +1,6 @@
 """Router: write-ahead logging, fallback, repair, cost ceiling, and the
 bull/bear model-divergence rule."""
+
 import json
 
 import pytest
@@ -20,17 +21,18 @@ BAD = json.dumps({"nope": 1})
 
 
 def router_with(openai_script=(), anthropic_script=(), gemini_script=()):
-    return ModelRouter(providers={
-        "openai": FakeProvider("openai", list(openai_script)),
-        "anthropic": FakeProvider("anthropic", list(anthropic_script)),
-        "gemini": FakeProvider("gemini", list(gemini_script)),
-    })
+    return ModelRouter(
+        providers={
+            "openai": FakeProvider("openai", list(openai_script)),
+            "anthropic": FakeProvider("anthropic", list(anthropic_script)),
+            "gemini": FakeProvider("gemini", list(gemini_script)),
+        }
+    )
 
 
 def test_success_logs_cost_and_call(db):
     r = router_with(openai_script=[GOOD])
-    out = r.run(db, task_type="triage", output_schema=Out,
-                system_prompt="s", user_prompt="u")
+    out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
     events = db.scalars(select(CostEvent)).all()
     calls = db.scalars(select(ModelCall)).all()
@@ -42,8 +44,7 @@ def test_success_logs_cost_and_call(db):
 
 def test_failed_parse_is_logged_then_repaired(db):
     r = router_with(openai_script=[BAD, GOOD])
-    out = r.run(db, task_type="triage", output_schema=Out,
-                system_prompt="s", user_prompt="u")
+    out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
     calls = db.scalars(select(ModelCall)).all()
     assert [c.parse_ok for c in calls] == [False, True]
@@ -53,31 +54,43 @@ def test_failed_parse_is_logged_then_repaired(db):
 
 def test_provider_error_falls_through(db):
     r = router_with(openai_script=[provider_error], gemini_script=[GOOD])
-    out = r.run(db, task_type="triage", output_schema=Out,
-                system_prompt="s", user_prompt="u")
+    out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
 
 
 def test_all_fail_raises_with_attempts(db):
-    r = router_with(openai_script=[provider_error],
-                    gemini_script=[provider_error],
-                    anthropic_script=[provider_error])
+    r = router_with(
+        openai_script=[provider_error],
+        gemini_script=[provider_error],
+        anthropic_script=[provider_error],
+    )
     with pytest.raises(RoutingError, match="All candidates failed"):
-        r.run(db, task_type="triage", output_schema=Out,
-              system_prompt="s", user_prompt="u")
+        r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
 
 
 def test_cost_ceiling_skips_everything(db):
     r = router_with(openai_script=[GOOD])
     with pytest.raises(RoutingError, match="Cost ceiling"):
-        r.run(db, task_type="triage", output_schema=Out,
-              system_prompt="s" * 100_000, user_prompt="u", max_cost_usd=0.000001)
+        r.run(
+            db,
+            task_type="triage",
+            output_schema=Out,
+            system_prompt="s" * 100_000,
+            user_prompt="u",
+            max_cost_usd=0.000001,
+        )
 
 
 def test_high_risk_requires_high_tier(db):
     r = router_with(anthropic_script=[GOOD])
-    out = r.run(db, task_type="verdict", output_schema=Out,
-                system_prompt="s", user_prompt="u", risk_level="high")
+    out = r.run(
+        db,
+        task_type="verdict",
+        output_schema=Out,
+        system_prompt="s",
+        user_prompt="u",
+        risk_level="high",
+    )
     assert out.answer == "yes"
     call = db.scalars(select(ModelCall)).one()
     assert call.router_decision["chosen"] == "claude-sonnet-4-5"

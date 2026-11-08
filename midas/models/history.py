@@ -1,5 +1,6 @@
 """Equity history: one row per snapshot of the paper account, so the
 workstation can draw a real equity curve instead of inferring one."""
+
 from datetime import timedelta
 
 from sqlalchemy import Float, select
@@ -21,7 +22,8 @@ def record_equity_point(db: Session, min_interval_minutes: int = 30) -> EquityPo
     keeps the curve clean no matter how chatty the caller is."""
     last = db.scalar(select(EquityPoint).order_by(EquityPoint.created_at.desc()))
     if last is not None and utcnow() - aware(last.created_at) < timedelta(
-            minutes=min_interval_minutes):
+        minutes=min_interval_minutes
+    ):
         return None
     from midas.execution.paper_broker import get_account
 

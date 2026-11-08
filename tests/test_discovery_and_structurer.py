@@ -1,4 +1,5 @@
 """Discovery gating + structurer failure diagnosis."""
+
 from datetime import datetime, timezone
 
 from midas.config import settings
@@ -18,14 +19,41 @@ def test_discovery_disabled_paths(monkeypatch):
 def test_failure_histogram_names_the_killer():
     chain = [
         # dies on DTE
-        {"expiry": "2026-07-14", "dte": 4, "type": "call", "strike": 100,
-         "bid": 1.0, "ask": 1.1, "mid": 1.05, "open_interest": 500, "volume": 10},
+        {
+            "expiry": "2026-07-14",
+            "dte": 4,
+            "type": "call",
+            "strike": 100,
+            "bid": 1.0,
+            "ask": 1.1,
+            "mid": 1.05,
+            "open_interest": 500,
+            "volume": 10,
+        },
         # dies on OI and one-sided market
-        {"expiry": "2026-08-21", "dte": 42, "type": "call", "strike": 100,
-         "bid": 0.0, "ask": 1.1, "mid": 0.55, "open_interest": 3, "volume": 0},
+        {
+            "expiry": "2026-08-21",
+            "dte": 42,
+            "type": "call",
+            "strike": 100,
+            "bid": 0.0,
+            "ask": 1.1,
+            "mid": 0.55,
+            "open_interest": 3,
+            "volume": 0,
+        },
         # dies on spread
-        {"expiry": "2026-08-21", "dte": 42, "type": "call", "strike": 105,
-         "bid": 1.0, "ask": 1.5, "mid": 1.25, "open_interest": 500, "volume": 5},
+        {
+            "expiry": "2026-08-21",
+            "dte": 42,
+            "type": "call",
+            "strike": 105,
+            "bid": 1.0,
+            "ask": 1.5,
+            "mid": 1.25,
+            "open_interest": 500,
+            "volume": 5,
+        },
     ]
     diag = structurer_checks.failure_histogram(chain)
     assert diag["contracts_seen"] == 3
@@ -38,8 +66,7 @@ def test_failure_histogram_names_the_killer():
 def test_market_hours_gate(monkeypatch):
     monkeypatch.setattr(settings, "auto_cycle_market_hours_only", True)
     monkeypatch.setattr(settings, "auto_cycle_weekdays", "mon,tue,wed,thu,fri")
-    monkeypatch.setattr(monitor, "utcnow",
-                        lambda: datetime(2026, 7, 8, 3, 0, tzinfo=timezone.utc))
+    monkeypatch.setattr(monitor, "utcnow", lambda: datetime(2026, 7, 8, 3, 0, tzinfo=timezone.utc))
     # off-hours: the gate must stop the cycle before it touches the DB
     monkeypatch.setattr(monitor, "_us_market_hours", lambda: False)
     assert monitor.maybe_auto_cycle(lambda: None, None) is None
@@ -54,11 +81,13 @@ def test_market_calendar_fallback_weekday(monkeypatch):
     real_day = monitor._real_market_fns["day"]
     monkeypatch.setattr(settings, "alpaca_api_key", "")
     monitor._calendar_cache.update(date="", open=True)
-    monkeypatch.setattr(monitor, "utcnow",
-                        lambda: datetime(2026, 7, 11, 15, 0, tzinfo=timezone.utc))  # Saturday
+    monkeypatch.setattr(
+        monitor, "utcnow", lambda: datetime(2026, 7, 11, 15, 0, tzinfo=timezone.utc)
+    )  # Saturday
     assert real_day() is False
     monitor._calendar_cache.update(date="", open=True)
-    monkeypatch.setattr(monitor, "utcnow",
-                        lambda: datetime(2026, 7, 8, 15, 0, tzinfo=timezone.utc))  # Wednesday
+    monkeypatch.setattr(
+        monitor, "utcnow", lambda: datetime(2026, 7, 8, 15, 0, tzinfo=timezone.utc)
+    )  # Wednesday
     assert real_day() is True
     monitor._calendar_cache.update(date="", open=True)

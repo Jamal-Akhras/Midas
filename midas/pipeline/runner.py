@@ -1,6 +1,7 @@
 """Generic agent-stage execution: tools bound, snapshots stamped, cost
 attributed, artifact stored, audit written. Commit is the caller's boundary
 (commit-per-stage keeps completed work crash-durable)."""
+
 import json
 import logging
 import uuid
@@ -47,31 +48,35 @@ def check_daily_spend(db: Session) -> None:
     spent = sum(e.cost_usd for e in events if aware(e.created_at) >= start)
     if spent >= settings.daily_spend_limit_usd:
         raise SpendLimitError(
-            f"Daily AI spend limit reached (${spent:.2f} of "
-            f"${settings.daily_spend_limit_usd:.2f})."
+            f"Daily AI spend limit reached (${spent:.2f} of ${settings.daily_spend_limit_usd:.2f})."
         )
 
 
 def _run_cost(db: Session, run_id: uuid.UUID, agent_slug: str) -> float:
-    return db.scalar(
-        select(func.coalesce(func.sum(CostEvent.cost_usd), 0.0)).where(
-            CostEvent.run_id == run_id, CostEvent.agent_slug == agent_slug,
+    return (
+        db.scalar(
+            select(func.coalesce(func.sum(CostEvent.cost_usd), 0.0)).where(
+                CostEvent.run_id == run_id,
+                CostEvent.agent_slug == agent_slug,
+            )
         )
-    ) or 0.0
+        or 0.0
+    )
 
 
-def existing_artifact(db: Session, run_id: uuid.UUID,
-                      artifact_type: ArtifactType) -> ResearchArtifact | None:
+def existing_artifact(
+    db: Session, run_id: uuid.UUID, artifact_type: ArtifactType
+) -> ResearchArtifact | None:
     return db.scalar(
         select(ResearchArtifact)
-        .where(ResearchArtifact.run_id == run_id,
-               ResearchArtifact.artifact_type == artifact_type)
+        .where(ResearchArtifact.run_id == run_id, ResearchArtifact.artifact_type == artifact_type)
         .order_by(ResearchArtifact.version.desc())
     )
 
 
-def required_artifact(db: Session, run_id: uuid.UUID,
-                      artifact_type: ArtifactType) -> ResearchArtifact:
+def required_artifact(
+    db: Session, run_id: uuid.UUID, artifact_type: ArtifactType
+) -> ResearchArtifact:
     """An upstream artifact a later stage cannot run without. Missing means
     the pipeline was invoked out of order or the run is corrupt: fail loud."""
     art = existing_artifact(db, run_id, artifact_type)
@@ -80,12 +85,12 @@ def required_artifact(db: Session, run_id: uuid.UUID,
     return art
 
 
-def latest_artifact_for_ticker(db: Session, ticker: str,
-                               artifact_type: ArtifactType) -> ResearchArtifact | None:
+def latest_artifact_for_ticker(
+    db: Session, ticker: str, artifact_type: ArtifactType
+) -> ResearchArtifact | None:
     return db.scalar(
         select(ResearchArtifact)
-        .where(ResearchArtifact.ticker == ticker,
-               ResearchArtifact.artifact_type == artifact_type)
+        .where(ResearchArtifact.ticker == ticker, ResearchArtifact.artifact_type == artifact_type)
         .order_by(ResearchArtifact.created_at.desc())
     )
 
@@ -107,8 +112,14 @@ def fence_upstream(db: Session, run: PipelineRun, reads: list[ArtifactType]) -> 
 
 
 def run_agent_stage(
-    db: Session, router: ModelRouter, run: PipelineRun, agent: AgentDef[T],
-    *, task_text: str, ticker: str = "", extra_context: str = "",
+    db: Session,
+    router: ModelRouter,
+    run: PipelineRun,
+    agent: AgentDef[T],
+    *,
+    task_text: str,
+    ticker: str = "",
+    extra_context: str = "",
 ) -> tuple[ResearchArtifact, T]:
     """Execute one agent stage. Skips (returns stored artifact) if this run
     already produced this artifact type - that is the crash-resume path."""
@@ -121,8 +132,11 @@ def run_agent_stage(
     run.stage = agent.slug
     db.flush()
     record_event(
-        db, event_type="stage.started", summary=f"{agent.slug} started",
-        actor_type=ActorType.agent, run_id=run.id,
+        db,
+        event_type="stage.started",
+        summary=f"{agent.slug} started",
+        actor_type=ActorType.agent,
+        run_id=run.id,
     )
     db.commit()  # make the in-flight stage visible to the UI immediately
 
@@ -159,55 +173,77 @@ def run_agent_stage(
     cost = _run_cost(db, run.id, agent.slug) - cost_before
 
     last_event = db.scalar(
-        select(CostEvent).where(CostEvent.run_id == run.id,
-                                CostEvent.agent_slug == agent.slug)
+        select(CostEvent)
+        .where(CostEvent.run_id == run.id, CostEvent.agent_slug == agent.slug)
         .order_by(CostEvent.created_at.desc())
     )
-    version = 1 + (db.scalar(
-        select(func.max(ResearchArtifact.version)).where(
-            ResearchArtifact.ticker == ticker,
-            ResearchArtifact.artifact_type == agent.artifact_type,
+    version = 1 + (
+        db.scalar(
+            select(func.max(ResearchArtifact.version)).where(
+                ResearchArtifact.ticker == ticker,
+                ResearchArtifact.artifact_type == agent.artifact_type,
+            )
         )
-    ) or 0)
+        or 0
+    )
     artifact = ResearchArtifact(
-        run_id=run.id, ticker=ticker.upper(), agent_slug=agent.slug,
-        artifact_type=agent.artifact_type, content=parsed.model_dump(),
-        version=version, model_used=last_event.model if last_event else "",
+        run_id=run.id,
+        ticker=ticker.upper(),
+        agent_slug=agent.slug,
+        artifact_type=agent.artifact_type,
+        content=parsed.model_dump(),
+        version=version,
+        model_used=last_event.model if last_event else "",
         cost_usd=round(cost, 6),
     )
     db.add(artifact)
     db.flush()
     ctx.stamp_artifact(artifact.id)
     record_event(
-        db, event_type="stage.completed",
-        summary=f"{agent.slug} produced {agent.artifact_type.value} "
-                f"v{version} (${cost:.4f})",
-        actor_type=ActorType.agent, run_id=run.id,
-        subject_type="artifact", subject_id=artifact.id,
+        db,
+        event_type="stage.completed",
+        summary=f"{agent.slug} produced {agent.artifact_type.value} v{version} (${cost:.4f})",
+        actor_type=ActorType.agent,
+        run_id=run.id,
+        subject_type="artifact",
+        subject_id=artifact.id,
         payload={"artifact_type": agent.artifact_type.value, "cost_usd": cost},
     )
     return artifact, parsed
 
 
 def store_code_artifact(
-    db: Session, run: PipelineRun, *, agent_slug: str,
-    artifact_type: ArtifactType, content: dict, ticker: str = "",
+    db: Session,
+    run: PipelineRun,
+    *,
+    agent_slug: str,
+    artifact_type: ArtifactType,
+    content: dict,
+    ticker: str = "",
 ) -> ResearchArtifact:
     """Store deterministic (non-LLM) stage output with the same provenance."""
     existing = existing_artifact(db, run.id, artifact_type)
     if existing is not None:
         return existing
     artifact = ResearchArtifact(
-        run_id=run.id, ticker=ticker.upper(), agent_slug=agent_slug,
-        artifact_type=artifact_type, content=content, version=1,
-        model_used="deterministic-code", cost_usd=0.0,
+        run_id=run.id,
+        ticker=ticker.upper(),
+        agent_slug=agent_slug,
+        artifact_type=artifact_type,
+        content=content,
+        version=1,
+        model_used="deterministic-code",
+        cost_usd=0.0,
     )
     db.add(artifact)
     db.flush()
     record_event(
-        db, event_type="stage.completed",
+        db,
+        event_type="stage.completed",
         summary=f"{agent_slug} produced {artifact_type.value} (code, $0)",
-        actor_type=ActorType.system, run_id=run.id,
-        subject_type="artifact", subject_id=artifact.id,
+        actor_type=ActorType.system,
+        run_id=run.id,
+        subject_type="artifact",
+        subject_id=artifact.id,
     )
     return artifact

@@ -10,6 +10,7 @@ Quality rules enforced here:
 - Tool loop: bounded iterations; every tool result is snapshotted to
   DataSnapshot by the executor before the model sees it.
 """
+
 import json
 import logging
 import uuid
@@ -71,8 +72,11 @@ class ModelRouter:
         required = self.risk_rules.get("high_requires_tier")
         if risk_level == "high" and required:
             kept = [n for n in names if self.models[n]["tier"] == required]
-            rejected = [{"model": n, "reason": f"risk=high requires tier={required}"}
-                        for n in names if n not in kept]
+            rejected = [
+                {"model": n, "reason": f"risk=high requires tier={required}"}
+                for n in names
+                if n not in kept
+            ]
             names = kept
         if not names:
             raise RoutingError(f"No candidates for '{task_type}' at risk={risk_level}")
@@ -81,39 +85,69 @@ class ModelRouter:
     # ---------- write-ahead logging ----------
 
     def _log(
-        self, db: Session, *, resp: ModelResponse, task_type: str,
-        run_id: uuid.UUID | None, agent_slug: str | None, system_prompt: str,
-        user_prompt: str, messages: list[Message], schema_name: str | None,
-        parse_ok: bool, decision: dict[str, Any],
+        self,
+        db: Session,
+        *,
+        resp: ModelResponse,
+        task_type: str,
+        run_id: uuid.UUID | None,
+        agent_slug: str | None,
+        system_prompt: str,
+        user_prompt: str,
+        messages: list[Message],
+        schema_name: str | None,
+        parse_ok: bool,
+        decision: dict[str, Any],
     ) -> float:
         cost = self._price(resp.model, resp.tokens_in, resp.tokens_out)
         event = CostEvent(
-            run_id=run_id, agent_slug=agent_slug or "", task_type=task_type,
-            provider=resp.provider, model=resp.model, tokens_in=resp.tokens_in,
-            tokens_out=resp.tokens_out, cost_usd=cost, latency_ms=resp.latency_ms,
+            run_id=run_id,
+            agent_slug=agent_slug or "",
+            task_type=task_type,
+            provider=resp.provider,
+            model=resp.model,
+            tokens_in=resp.tokens_in,
+            tokens_out=resp.tokens_out,
+            cost_usd=cost,
+            latency_ms=resp.latency_ms,
         )
         db.add(event)
         db.flush()
-        db.add(ModelCall(
-            cost_event_id=event.id, system_prompt=system_prompt,
-            user_prompt=user_prompt, messages=_safe_messages(messages),
-            response_text=resp.text or json.dumps(
-                [{"tool": c.name, "arguments": c.arguments} for c in resp.tool_calls]
-            ),
-            output_schema_name=schema_name, parse_ok=parse_ok,
-            router_decision=decision,
-        ))
+        db.add(
+            ModelCall(
+                cost_event_id=event.id,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                messages=_safe_messages(messages),
+                response_text=resp.text
+                or json.dumps(
+                    [{"tool": c.name, "arguments": c.arguments} for c in resp.tool_calls]
+                ),
+                output_schema_name=schema_name,
+                parse_ok=parse_ok,
+                router_decision=decision,
+            )
+        )
         db.flush()
         return cost
 
     # ---------- main entry ----------
 
     def run(
-        self, db: Session, *, task_type: str, output_schema: type[T],
-        system_prompt: str, user_prompt: str, risk_level: str = "low",
-        max_cost_usd: float = 1.0, max_tokens: int = 4000,
-        run_id: uuid.UUID | None = None, agent_slug: str | None = None,
-        tools: list[ToolSpec] | None = None, tool_executor: ToolExecutor | None = None,
+        self,
+        db: Session,
+        *,
+        task_type: str,
+        output_schema: type[T],
+        system_prompt: str,
+        user_prompt: str,
+        risk_level: str = "low",
+        max_cost_usd: float = 1.0,
+        max_tokens: int = 4000,
+        run_id: uuid.UUID | None = None,
+        agent_slug: str | None = None,
+        tools: list[ToolSpec] | None = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> T:
         """Run a task to a schema-validated result, with optional tools.
 
@@ -130,32 +164,45 @@ class ModelRouter:
             provider_name = self.models[model_name]["provider"]
             provider = self.providers.get(provider_name)
             if provider is None:
-                attempts.append({"model": model_name,
-                                 "outcome": f"provider '{provider_name}' not registered"})
+                attempts.append(
+                    {"model": model_name, "outcome": f"provider '{provider_name}' not registered"}
+                )
                 continue
             est = self._estimate(model_name, system_prompt, user_prompt, max_tokens)
             if est > max_cost_usd - spent:
-                attempts.append({"model": model_name,
-                                 "outcome": f"skipped: est ${est:.3f} > remaining ceiling"})
+                attempts.append(
+                    {"model": model_name, "outcome": f"skipped: est ${est:.3f} > remaining ceiling"}
+                )
                 cost_skips += 1
                 continue
 
             decision_base = {
-                "task_type": task_type, "risk_level": risk_level,
-                "chosen": model_name, "rejected_by_risk": rejected,
+                "task_type": task_type,
+                "risk_level": risk_level,
+                "chosen": model_name,
+                "rejected_by_risk": rejected,
                 "prior_attempts": list(attempts),
                 "estimated_cost_usd": round(est, 4),
                 "tools_enabled": bool(tools),
             }
             try:
                 parsed, spent = self._attempt_model(
-                    db, provider=provider, model_name=model_name,
-                    task_type=task_type, output_schema=output_schema,
-                    schema=schema, system_prompt=system_prompt,
-                    user_prompt=user_prompt, max_tokens=max_tokens,
-                    run_id=run_id, agent_slug=agent_slug, tools=tools,
-                    tool_executor=tool_executor, decision_base=decision_base,
-                    spent=spent, max_cost_usd=max_cost_usd,
+                    db,
+                    provider=provider,
+                    model_name=model_name,
+                    task_type=task_type,
+                    output_schema=output_schema,
+                    schema=schema,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    max_tokens=max_tokens,
+                    run_id=run_id,
+                    agent_slug=agent_slug,
+                    tools=tools,
+                    tool_executor=tool_executor,
+                    decision_base=decision_base,
+                    spent=spent,
+                    max_cost_usd=max_cost_usd,
                 )
             except ProviderError as exc:
                 attempts.append({"model": model_name, "outcome": f"provider error: {exc}"})
@@ -175,12 +222,24 @@ class ModelRouter:
     # ---------- per-model attempt (tool loop + parse/repair) ----------
 
     def _attempt_model(
-        self, db: Session, *, provider: ModelProvider, model_name: str,
-        task_type: str, output_schema: type[T], schema: dict,
-        system_prompt: str, user_prompt: str, max_tokens: int,
-        run_id: uuid.UUID | None, agent_slug: str | None,
-        tools: list[ToolSpec] | None, tool_executor: ToolExecutor | None,
-        decision_base: dict, spent: float, max_cost_usd: float,
+        self,
+        db: Session,
+        *,
+        provider: ModelProvider,
+        model_name: str,
+        task_type: str,
+        output_schema: type[T],
+        schema: dict,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int,
+        run_id: uuid.UUID | None,
+        agent_slug: str | None,
+        tools: list[ToolSpec] | None,
+        tool_executor: ToolExecutor | None,
+        decision_base: dict,
+        spent: float,
+        max_cost_usd: float,
     ) -> tuple[T, float]:
         messages: list[Message] = [{"role": "user", "content": user_prompt}]
 
@@ -189,28 +248,41 @@ class ModelRouter:
             tool_chars = 0
             for iteration in range(MAX_TOOL_ITERATIONS):
                 resp = provider.complete(
-                    model=model_name, system_prompt=system_prompt,
-                    messages=messages, tools=tools, json_output=False,
+                    model=model_name,
+                    system_prompt=system_prompt,
+                    messages=messages,
+                    tools=tools,
+                    json_output=False,
                     max_tokens=max_tokens,
                 )
                 decision = {**decision_base, "phase": "tool_loop", "iteration": iteration}
                 spent += self._log(
-                    db, resp=resp, task_type=task_type, run_id=run_id,
-                    agent_slug=agent_slug, system_prompt=system_prompt,
-                    user_prompt=user_prompt, messages=messages,
-                    schema_name=None, parse_ok=True, decision=decision,
+                    db,
+                    resp=resp,
+                    task_type=task_type,
+                    run_id=run_id,
+                    agent_slug=agent_slug,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    messages=messages,
+                    schema_name=None,
+                    parse_ok=True,
+                    decision=decision,
                 )
                 if not resp.tool_calls:
                     # model is done researching; fall through to parse phase
                     messages.append({"role": "assistant", "content": resp.text})
                     break
-                messages.append({
-                    "role": "assistant", "content": resp.text,
-                    "tool_calls": [
-                        {"id": c.id, "name": c.name, "arguments": c.arguments}
-                        for c in resp.tool_calls
-                    ],
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": resp.text,
+                        "tool_calls": [
+                            {"id": c.id, "name": c.name, "arguments": c.arguments}
+                            for c in resp.tool_calls
+                        ],
+                    }
+                )
                 for call in resp.tool_calls:
                     result = _run_tool(tool_executor, call.name, call.arguments)
                     # Context budget: full data lives in the snapshot table;
@@ -220,14 +292,19 @@ class ModelRouter:
                     text = json.dumps(result, default=str)[:6000]
                     tool_chars += len(text)
                     if tool_chars > 90000:
-                        text = (text[:400] + '"}]... [TOOL-RESULT BUDGET '
-                                'EXHAUSTED: stop calling tools and produce '
-                                'your final answer from the data above]')
-                    messages.append({
-                        "role": "tool", "tool_call_id": call.id,
-                        "name": call.name,
-                        "content": text,
-                    })
+                        text = (
+                            text[:400] + '"}]... [TOOL-RESULT BUDGET '
+                            "EXHAUSTED: stop calling tools and produce "
+                            "your final answer from the data above]"
+                        )
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": call.id,
+                            "name": call.name,
+                            "content": text,
+                        }
+                    )
                 if spent >= max_cost_usd:
                     logger.warning("tool loop for %s stopped by cost ceiling", agent_slug)
                     break
@@ -242,37 +319,58 @@ class ModelRouter:
         messages.append({"role": "user", "content": ask})
         for attempt in ("first", "repair"):
             resp = provider.complete(
-                model=model_name, system_prompt=system_prompt, messages=messages,
-                tools=None, json_output=True, json_schema=schema,
+                model=model_name,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=None,
+                json_output=True,
+                json_schema=schema,
                 max_tokens=max_tokens,
             )
             decision = {**decision_base, "phase": "final", "attempt": attempt}
             try:
                 parsed = output_schema.model_validate(_extract_json(resp.text))
                 spent += self._log(
-                    db, resp=resp, task_type=task_type, run_id=run_id,
-                    agent_slug=agent_slug, system_prompt=system_prompt,
-                    user_prompt=user_prompt, messages=messages,
-                    schema_name=output_schema.__name__, parse_ok=True,
+                    db,
+                    resp=resp,
+                    task_type=task_type,
+                    run_id=run_id,
+                    agent_slug=agent_slug,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    messages=messages,
+                    schema_name=output_schema.__name__,
+                    parse_ok=True,
                     decision=decision,
                 )
                 return parsed, spent
             except (ValidationError, ValueError) as exc:
                 spent += self._log(
-                    db, resp=resp, task_type=task_type, run_id=run_id,
-                    agent_slug=agent_slug, system_prompt=system_prompt,
-                    user_prompt=user_prompt, messages=messages,
-                    schema_name=output_schema.__name__, parse_ok=False,
+                    db,
+                    resp=resp,
+                    task_type=task_type,
+                    run_id=run_id,
+                    agent_slug=agent_slug,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    messages=messages,
+                    schema_name=output_schema.__name__,
+                    parse_ok=False,
                     decision=decision,
                 )
                 if attempt == "first":
                     messages.append({"role": "assistant", "content": resp.text})
-                    messages.append({"role": "user", "content": (
-                        "Your previous response failed validation.\n"
-                        f"Validation error:\n{str(exc)[:2000]}\n\n"
-                        "Fix the problems and return ONLY a valid JSON object "
-                        "matching the required schema."
-                    )})
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "Your previous response failed validation.\n"
+                                f"Validation error:\n{str(exc)[:2000]}\n\n"
+                                "Fix the problems and return ONLY a valid JSON object "
+                                "matching the required schema."
+                            ),
+                        }
+                    )
         raise _ParseFailed()
 
 
@@ -309,7 +407,7 @@ def _extract_json(text: str) -> Any:
     end = text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("no JSON object found in response")
-    return json.loads(text[start:end + 1])
+    return json.loads(text[start : end + 1])
 
 
 _default_router: ModelRouter | None = None
@@ -331,12 +429,15 @@ def get_router() -> ModelRouter:
             providers: dict[str, ModelProvider] = {}
             if settings.openai_api_key:
                 from midas.providers.openai_provider import OpenAIProvider
+
                 providers["openai"] = OpenAIProvider()
             if settings.anthropic_api_key:
                 from midas.providers.anthropic_provider import AnthropicProvider
+
                 providers["anthropic"] = AnthropicProvider()
             if settings.gemini_api_key:
                 from midas.providers.gemini_provider import GeminiProvider
+
                 providers["gemini"] = GeminiProvider()
             _default_router = ModelRouter(providers=providers)
     return _default_router

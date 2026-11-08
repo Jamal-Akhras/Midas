@@ -4,18 +4,20 @@ a violation triggers the router's repair path.
 Honest-data rule, schema-enforced where possible: research claims carry
 sources; anything without a source belongs in `unverified`.
 """
+
 from pydantic import BaseModel, Field, model_validator
 
 # ---------- screener ----------
 
+
 class ScreenCandidate(BaseModel):
     ticker: str
-    setup: str                      # which configured setup it matches
+    setup: str  # which configured setup it matches
     score: float = Field(ge=0, le=100)
     price: float
     avg_volume: float
     rationale: str
-    data_points: list[str] = []     # raw numbers cited from tool results
+    data_points: list[str] = []  # raw numbers cited from tool results
 
 
 class ScreenOutput(BaseModel):
@@ -26,8 +28,9 @@ class ScreenOutput(BaseModel):
 
 # ---------- fundamentals ----------
 
+
 class EarningsQuarter(BaseModel):
-    period: str                     # e.g. "2026Q1"
+    period: str  # e.g. "2026Q1"
     eps_actual: float | None = None
     eps_estimate: float | None = None
     surprise_pct: float | None = None
@@ -36,20 +39,21 @@ class EarningsQuarter(BaseModel):
 class FundamentalsOutput(BaseModel):
     ticker: str
     recent_quarters: list[EarningsQuarter]
-    next_earnings_date: str = ""    # ISO date or "" if unknown
+    next_earnings_date: str = ""  # ISO date or "" if unknown
     projected_eps_next_q: float | None = None
     projected_revenue_growth_pct: float | None = None
     key_ratios: dict[str, float] = {}
     guidance_history: str = ""
-    unverified: list[str] = []      # anything a tool call could not confirm
+    unverified: list[str] = []  # anything a tool call could not confirm
 
 
 # ---------- deep research ----------
 
+
 class SourcedClaim(BaseModel):
     claim: str
     source_url: str
-    retrieved_at: str               # ISO timestamp from the tool result
+    retrieved_at: str  # ISO timestamp from the tool result
 
     @model_validator(mode="after")
     def _must_have_source(self) -> "SourcedClaim":
@@ -59,7 +63,7 @@ class SourcedClaim(BaseModel):
 
 
 class DossierSection(BaseModel):
-    topic: str                      # filings|management|insiders|pipeline|coverage
+    topic: str  # filings|management|insiders|pipeline|coverage
     claims: list[SourcedClaim]
 
 
@@ -68,7 +72,7 @@ class DossierOutput(BaseModel):
     sections: list[DossierSection]
     management_quality_notes: str = ""
     insider_activity_summary: str = ""
-    unverified: list[str] = []      # model-memory claims are forbidden as fact; they go here
+    unverified: list[str] = []  # model-memory claims are forbidden as fact; they go here
     overall_take: str = ""
 
     @model_validator(mode="after")
@@ -80,10 +84,11 @@ class DossierOutput(BaseModel):
 
 # ---------- catalysts ----------
 
+
 class Catalyst(BaseModel):
     event: str
-    date: str = ""                  # ISO date or "" if unscheduled
-    expected_impact: str            # high|medium|low
+    date: str = ""  # ISO date or "" if unscheduled
+    expected_impact: str  # high|medium|low
     source_url: str = ""
 
 
@@ -97,6 +102,7 @@ class CatalystOutput(BaseModel):
 
 # ---------- passable gate (cheap-model triage) ----------
 
+
 class TriageOutput(BaseModel):
     ticker: str
     passable: bool
@@ -106,22 +112,24 @@ class TriageOutput(BaseModel):
 
 # ---------- bull / bear ----------
 
+
 class DirectionalCase(BaseModel):
     ticker: str
-    stance: str                     # bull|bear
+    stance: str  # bull|bear
     conviction: float = Field(ge=0, le=10)
     core_argument: str
-    key_evidence: list[str]         # references to dossier/fundamentals claims
-    expected_move_pct: float        # signed; bull positive, bear negative
+    key_evidence: list[str]  # references to dossier/fundamentals claims
+    expected_move_pct: float  # signed; bull positive, bear negative
     expected_timeframe_days: int = Field(gt=0)
     what_would_change_my_mind: list[str]
 
 
 # ---------- options structurer (LLM assist; hard checks are code) ----------
 
+
 class StructureProposal(BaseModel):
-    strategy: str                   # long_call|long_put|call_debit_spread|put_debit_spread
-    expiry: str                     # ISO date
+    strategy: str  # long_call|long_put|call_debit_spread|put_debit_spread
+    expiry: str  # ISO date
     long_strike: float
     short_strike: float | None = None
     rationale: str
@@ -135,6 +143,7 @@ class StructureAssistOutput(BaseModel):
 
 # ---------- investor verdict ----------
 
+
 class ReviewSchedule(BaseModel):
     cadence_days: int = Field(gt=0, default=1)
     event_triggers: list[str] = ["earnings", "invalidation", "dte"]
@@ -142,9 +151,9 @@ class ReviewSchedule(BaseModel):
 
 class VerdictOutput(BaseModel):
     ticker: str
-    verdict: str                    # trade|no_trade
-    direction: str = ""             # bullish|bearish (required when trade)
-    instrument: str = ""            # shares|option (required when trade)
+    verdict: str  # trade|no_trade
+    direction: str = ""  # bullish|bearish (required when trade)
+    instrument: str = ""  # shares|option (required when trade)
     entry_zone_low: float | None = None
     entry_zone_high: float | None = None
     stop_price: float | None = None
@@ -159,10 +168,8 @@ class VerdictOutput(BaseModel):
         # Models sometimes answer 'long/short' or 'stock/options'; map the
         # unambiguous synonyms deterministically, reject anything else so
         # the router's repair attempt fixes it.
-        dir_map = {"long": "bullish", "short": "bearish",
-                   "bull": "bullish", "bear": "bearish"}
-        inst_map = {"options": "option", "stock": "shares",
-                    "equity": "shares", "share": "shares"}
+        dir_map = {"long": "bullish", "short": "bearish", "bull": "bullish", "bear": "bearish"}
+        inst_map = {"options": "option", "stock": "shares", "equity": "shares", "share": "shares"}
         if self.direction:
             d = self.direction.strip().lower()
             self.direction = dir_map.get(d, d)
@@ -174,12 +181,17 @@ class VerdictOutput(BaseModel):
                 raise ValueError("direction must be 'bullish' or 'bearish'")
             if self.instrument not in ("shares", "option"):
                 raise ValueError("instrument must be 'shares' or 'option'")
-            missing = [f for f, v in {
-                "direction": self.direction, "instrument": self.instrument,
-                "entry_zone_low": self.entry_zone_low,
-                "entry_zone_high": self.entry_zone_high,
-                "stop_price": self.stop_price,
-            }.items() if not v]
+            missing = [
+                f
+                for f, v in {
+                    "direction": self.direction,
+                    "instrument": self.instrument,
+                    "entry_zone_low": self.entry_zone_low,
+                    "entry_zone_high": self.entry_zone_high,
+                    "stop_price": self.stop_price,
+                }.items()
+                if not v
+            ]
             if missing:
                 raise ValueError(f"a 'trade' verdict requires: {missing}")
             if not self.what_invalidates_this:
@@ -193,6 +205,7 @@ class VerdictOutput(BaseModel):
 
 
 # ---------- position re-evaluation ----------
+
 
 class PostMortemOutput(BaseModel):
     ticker: str
@@ -209,15 +222,20 @@ class PostMortemOutput(BaseModel):
 
 class PortfolioAction(BaseModel):
     ticker: str
-    decision: str                   # hold|trim|exit
+    decision: str  # hold|trim|exit
     reasons: list[str] = []
 
     @model_validator(mode="after")
     def _valid(self) -> "PortfolioAction":
         self.ticker = self.ticker.upper().strip()
         d = self.decision.lower().strip()
-        d = {"sell": "exit", "close": "exit", "reduce": "trim",
-             "keep": "hold", "maintain": "hold"}.get(d, d)
+        d = {
+            "sell": "exit",
+            "close": "exit",
+            "reduce": "trim",
+            "keep": "hold",
+            "maintain": "hold",
+        }.get(d, d)
         if d not in ("hold", "trim", "exit"):
             raise ValueError("decision must be hold|trim|exit")
         self.decision = d
@@ -227,17 +245,17 @@ class PortfolioAction(BaseModel):
 
 
 class PortfolioReviewOutput(BaseModel):
-    assessment: str                 # one-paragraph book-level view
+    assessment: str  # one-paragraph book-level view
     actions: list[PortfolioAction]
-    rebalance_note: str = ""        # concentration / correlation observations
+    rebalance_note: str = ""  # concentration / correlation observations
 
 
 class ReevaluationOutput(BaseModel):
     ticker: str
-    decision: str                   # hold|trim|exit|roll
+    decision: str  # hold|trim|exit|roll
     reasons: list[str]
     thesis_still_valid: bool
-    time_pressure_note: str = ""    # required thinking for options as DTE decays
+    time_pressure_note: str = ""  # required thinking for options as DTE decays
     next_review_days: int = Field(gt=0, default=1)
 
     @model_validator(mode="after")

@@ -1,4 +1,5 @@
 """OpenAI provider (Chat Completions via httpx)."""
+
 import json
 import time
 
@@ -14,9 +15,15 @@ class OpenAIProvider:
     name = "openai"
 
     def complete(
-        self, *, model: str, system_prompt: str, messages: list[Message],
-        tools: list[ToolSpec] | None = None, json_output: bool = False,
-        json_schema: dict | None = None, max_tokens: int = 4000,
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        messages: list[Message],
+        tools: list[ToolSpec] | None = None,
+        json_output: bool = False,
+        json_schema: dict | None = None,
+        max_tokens: int = 4000,
     ) -> ModelResponse:
         payload: dict = {
             "model": model,
@@ -25,9 +32,14 @@ class OpenAIProvider:
         }
         if tools:
             payload["tools"] = [
-                {"type": "function",
-                 "function": {"name": t.name, "description": t.description,
-                              "parameters": t.parameters}}
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
                 for t in tools
             ]
         elif json_output:
@@ -37,7 +49,9 @@ class OpenAIProvider:
             for attempt in (1, 2, 3):
                 try:
                     resp = httpx.post(
-                        API_URL, json=payload, timeout=120,
+                        API_URL,
+                        json=payload,
+                        timeout=120,
                         headers={"Authorization": f"Bearer {settings.openai_api_key}"},
                     )
                     # transient gateway errors (Cloudflare 520/522, 500/502/
@@ -59,20 +73,24 @@ class OpenAIProvider:
                 detail = exc.response.json().get("error", {}).get("message", "")[:200]
             except Exception:
                 detail = exc.response.text[:120]
-            raise ProviderError(
-                f"openai: HTTP {exc.response.status_code}: {detail}") from exc
+            raise ProviderError(f"openai: HTTP {exc.response.status_code}: {detail}") from exc
         except httpx.HTTPError as exc:
             raise ProviderError(f"openai: {type(exc).__name__}") from exc
         data = resp.json()
         msg = data["choices"][0]["message"]
         tool_calls = [
-            ToolCall(id=c["id"], name=c["function"]["name"],
-                     arguments=_json_or_empty(c["function"]["arguments"]))
+            ToolCall(
+                id=c["id"],
+                name=c["function"]["name"],
+                arguments=_json_or_empty(c["function"]["arguments"]),
+            )
             for c in msg.get("tool_calls") or []
         ]
         usage = data.get("usage", {})
         return ModelResponse(
-            provider=self.name, model=model, text=msg.get("content") or "",
+            provider=self.name,
+            model=model,
+            text=msg.get("content") or "",
             tool_calls=tool_calls,
             tokens_in=usage.get("prompt_tokens", 0),
             tokens_out=usage.get("completion_tokens", 0),
@@ -92,18 +110,25 @@ def _to_openai(messages: list[Message]) -> list[dict]:
     out: list[dict] = []
     for m in messages:
         if m["role"] == "tool":
-            out.append({"role": "tool", "tool_call_id": m["tool_call_id"],
-                        "content": m["content"]})
+            out.append({"role": "tool", "tool_call_id": m["tool_call_id"], "content": m["content"]})
         elif m["role"] == "assistant" and m.get("tool_calls"):
-            out.append({
-                "role": "assistant", "content": m.get("content") or None,
-                "tool_calls": [
-                    {"id": c["id"], "type": "function",
-                     "function": {"name": c["name"],
-                                  "arguments": json.dumps(c["arguments"])}}
-                    for c in m["tool_calls"]
-                ],
-            })
+            out.append(
+                {
+                    "role": "assistant",
+                    "content": m.get("content") or None,
+                    "tool_calls": [
+                        {
+                            "id": c["id"],
+                            "type": "function",
+                            "function": {
+                                "name": c["name"],
+                                "arguments": json.dumps(c["arguments"]),
+                            },
+                        }
+                        for c in m["tool_calls"]
+                    ],
+                }
+            )
         else:
             out.append({"role": m["role"], "content": m["content"]})
     return out

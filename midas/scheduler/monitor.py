@@ -10,6 +10,7 @@ timer, or `midas monitor --loop`. It:
    proximity, invalidation price hit, DTE decay),
 5. scores newly closed positions.
 """
+
 import logging
 from collections.abc import Callable
 from datetime import timedelta
@@ -56,15 +57,19 @@ def sweep_stale_runs(db: Session, max_age_minutes: int = STALE_RUN_MINUTES) -> i
     again. Completed artifacts survive; a resumed run skips past them."""
     cutoff = utcnow() - timedelta(minutes=max_age_minutes)
     stale = [
-        r for r in db.scalars(select(PipelineRun)
-                              .where(PipelineRun.status == RunStatus.running))
+        r
+        for r in db.scalars(select(PipelineRun).where(PipelineRun.status == RunStatus.running))
         if aware(r.updated_at or r.created_at) < cutoff
     ]
     for r in stale:
         r.status = RunStatus.failed
         r.error = "orphaned by process restart"
-        record_event(db, event_type="run.failed",
-                     summary=f"run {r.id} orphaned by process restart", run_id=r.id)
+        record_event(
+            db,
+            event_type="run.failed",
+            summary=f"run {r.id} orphaned by process restart",
+            run_id=r.id,
+        )
     if stale:
         db.flush()
         logger.info("sweep: failed %d orphaned run(s)", len(stale))
@@ -82,23 +87,28 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
     due: list[tuple[Position, CheckpointTrigger, str]] = []
     for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
         thesis = db.get(TradeThesis, p.thesis_id)
-        recently_reviewed = (
-            p.last_reviewed_at is not None
-            and now - aware(p.last_reviewed_at) < timedelta(hours=20)
-        )
+        recently_reviewed = p.last_reviewed_at is not None and now - aware(
+            p.last_reviewed_at
+        ) < timedelta(hours=20)
         # invalidation price hit (event trigger beats the calendar). The stop
         # lives on the UNDERLYING, so options check the underlying quote,
         # not the option mark.
         underlying_price = _underlying_price(db, p)
         stop = p.stop_price or (thesis.stop_price if thesis else 0)
         if underlying_price is not None and thesis is not None and stop:
-            breached = (underlying_price <= stop
-                        if thesis.direction == Direction.bullish
-                        else underlying_price >= stop)
+            breached = (
+                underlying_price <= stop
+                if thesis.direction == Direction.bullish
+                else underlying_price >= stop
+            )
             if breached:
-                due.append((p, CheckpointTrigger.invalidation,
-                            f"underlying {underlying_price} breached stop "
-                            f"{stop}"))
+                due.append(
+                    (
+                        p,
+                        CheckpointTrigger.invalidation,
+                        f"underlying {underlying_price} breached stop {stop}",
+                    )
+                )
                 continue
         # earnings inside the lookahead window (matters doubly for options)
         earnings_note = None if recently_reviewed else _earnings_proximity(db, p)
@@ -106,8 +116,11 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
             due.append((p, CheckpointTrigger.earnings, earnings_note))
             continue
         # DTE decay for options
-        if (p.instrument == Instrument.option and p.option_detail.get("expiry")
-                and not recently_reviewed):
+        if (
+            p.instrument == Instrument.option
+            and p.option_detail.get("expiry")
+            and not recently_reviewed
+        ):
             from datetime import date
 
             dte = (date.fromisoformat(p.option_detail["expiry"]) - date.today()).days
@@ -164,8 +177,7 @@ def _underlying_price(db: Session, p: Position) -> float | None:
         return None
 
 
-def execute_stop_exit(session_factory: Callable[[], Session],
-                      position_id, reason: str) -> str:
+def execute_stop_exit(session_factory: Callable[[], Session], position_id, reason: str) -> str:
     """Invalidation-price breach: the exit is DETERMINISTIC CODE. The
     reevaluator never gets a vote on a breached stop - a stop a model can
     override is not a stop. Routed through the autonomy ladder ($0 AI)."""
@@ -175,34 +187,49 @@ def execute_stop_exit(session_factory: Callable[[], Session],
         position = db.get(Position, position_id)
         if position is None or position.status != PositionStatus.open:
             return "already closed"
-        pending = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.subject_type == "order_proposal",
-            ApprovalRequest.subject_id == position.id,
-            ApprovalRequest.status == ApprovalStatus.pending))
+        pending = db.scalar(
+            select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == "order_proposal",
+                ApprovalRequest.subject_id == position.id,
+                ApprovalRequest.status == ApprovalStatus.pending,
+            )
+        )
         if pending is not None:
             return "awaiting operator"
-        db.add(ReviewCheckpoint(
-            position_id=position.id, due_at=utcnow(),
-            trigger=CheckpointTrigger.invalidation,
-            status=CheckpointStatus.done, decision="exit",
-            notes=f"{reason} (deterministic code exit)",
-        ))
+        db.add(
+            ReviewCheckpoint(
+                position_id=position.id,
+                due_at=utcnow(),
+                trigger=CheckpointTrigger.invalidation,
+                status=CheckpointStatus.done,
+                decision="exit",
+                notes=f"{reason} (deterministic code exit)",
+            )
+        )
         record_event(
-            db, event_type="stop.breach_exit",
+            db,
+            event_type="stop.breach_exit",
             summary=f"{position.symbol}: {reason} - deterministic exit",
-            actor_type=ActorType.system, subject_type="position",
+            actor_type=ActorType.system,
+            subject_type="position",
             subject_id=position.id,
         )
         executor.propose_or_execute_exit(
-            db, position, decision="exit",
-            reasons=[reason, "stop breach exits are code, not a model decision"])
+            db,
+            position,
+            decision="exit",
+            reasons=[reason, "stop breach exits are code, not a model decision"],
+        )
         db.commit()
         return "exit"
 
 
 def reevaluate_position(
-    session_factory: Callable[[], Session], router: ModelRouter,
-    position_id, trigger: CheckpointTrigger, reason: str,
+    session_factory: Callable[[], Session],
+    router: ModelRouter,
+    position_id,
+    trigger: CheckpointTrigger,
+    reason: str,
 ) -> str:
     """Run the re-evaluation agent for one position and route its decision
     through the autonomy ladder. Returns the decision."""
@@ -211,37 +238,53 @@ def reevaluate_position(
         assert position is not None, f"review of unknown position {position_id}"
         thesis = db.get(TradeThesis, position.thesis_id)
         assert thesis is not None, f"position {position_id} has no thesis"
-        run = PipelineRun(kind=RunKind.reevaluation, ticker=position.ticker,
-                          position_id=position.id)
+        run = PipelineRun(
+            kind=RunKind.reevaluation, ticker=position.ticker, position_id=position.id
+        )
         db.add(run)
         db.flush()
         checkpoint = ReviewCheckpoint(
-            position_id=position.id, due_at=utcnow(), trigger=trigger,
+            position_id=position.id,
+            due_at=utcnow(),
+            trigger=trigger,
             notes=reason,
         )
         db.add(checkpoint)
 
-        thesis_block = render_content({
-            "ticker": thesis.ticker, "direction": thesis.direction.value,
-            "instrument": thesis.instrument.value,
-            "entry_zone": [thesis.entry_zone_low, thesis.entry_zone_high],
-            "stop_price": thesis.stop_price, "targets": thesis.targets,
-            "thesis_summary": thesis.thesis_summary,
-            "invalidators": thesis.invalidators,
-        })
-        position_block = render_content({
-            "symbol": position.symbol, "qty": position.qty,
-            "avg_price": position.avg_price,
-            "last_mark_price": position.last_mark_price,
-            "opened_at": str(position.opened_at),
-            "option_detail": position.option_detail,
-            "trigger": trigger.value, "trigger_reason": reason,
-        })
+        thesis_block = render_content(
+            {
+                "ticker": thesis.ticker,
+                "direction": thesis.direction.value,
+                "instrument": thesis.instrument.value,
+                "entry_zone": [thesis.entry_zone_low, thesis.entry_zone_high],
+                "stop_price": thesis.stop_price,
+                "targets": thesis.targets,
+                "thesis_summary": thesis.thesis_summary,
+                "invalidators": thesis.invalidators,
+            }
+        )
+        position_block = render_content(
+            {
+                "symbol": position.symbol,
+                "qty": position.qty,
+                "avg_price": position.avg_price,
+                "last_mark_price": position.last_mark_price,
+                "opened_at": str(position.opened_at),
+                "option_detail": position.option_detail,
+                "trigger": trigger.value,
+                "trigger_reason": reason,
+            }
+        )
         artifact, reeval = run_agent_stage(
-            db, router, run, AGENT_DEFS["reevaluator"],
-            task_text=("Re-evaluate this OPEN position against its thesis.\n\n"
-                       f"Original thesis:\n{thesis_block}\n\n"
-                       f"Position:\n{position_block}"),
+            db,
+            router,
+            run,
+            AGENT_DEFS["reevaluator"],
+            task_text=(
+                "Re-evaluate this OPEN position against its thesis.\n\n"
+                f"Original thesis:\n{thesis_block}\n\n"
+                f"Position:\n{position_block}"
+            ),
             ticker=position.ticker,
         )
         checkpoint.status = CheckpointStatus.done
@@ -251,16 +294,21 @@ def reevaluate_position(
         position.next_review_at = utcnow() + timedelta(days=reeval.next_review_days)
         run.status = RunStatus.done
         record_event(
-            db, event_type="position.reviewed",
-            summary=f"{position.symbol}: {reeval.decision} "
-                    f"({trigger.value}: {reason})",
-            actor_type=ActorType.agent, run_id=run.id,
-            subject_type="position", subject_id=position.id,
+            db,
+            event_type="position.reviewed",
+            summary=f"{position.symbol}: {reeval.decision} ({trigger.value}: {reason})",
+            actor_type=ActorType.agent,
+            run_id=run.id,
+            subject_type="position",
+            subject_id=position.id,
             payload={"decision": reeval.decision, "reasons": reeval.reasons},
         )
         if reeval.decision in ("exit", "trim", "roll"):
             executor.propose_or_execute_exit(
-                db, position, decision=reeval.decision, reasons=reeval.reasons,
+                db,
+                position,
+                decision=reeval.decision,
+                reasons=reeval.reasons,
                 artifact_id=artifact.id,
             )
         db.commit()
@@ -284,27 +332,37 @@ def execute_approved_theses(db: Session) -> int:
             return 5.0
 
     pending = sorted(
-        db.scalars(select(TradeThesis)
-                   .where(TradeThesis.status == ThesisStatus.approved)),
-        key=_conviction, reverse=True)
+        db.scalars(select(TradeThesis).where(TradeThesis.status == ThesisStatus.approved)),
+        key=_conviction,
+        reverse=True,
+    )
     count = 0
     for thesis in pending:
         if (utcnow() - aware(thesis.created_at)).days >= 5:
             thesis.status = ThesisStatus.rejected
-            record_event(db, event_type="thesis.expired",
-                         summary=f"{thesis.ticker}: never reached its entry "
-                                 f"zone within 5 days - thesis expired",
-                         subject_type="thesis", subject_id=thesis.id)
+            record_event(
+                db,
+                event_type="thesis.expired",
+                summary=f"{thesis.ticker}: never reached its entry "
+                f"zone within 5 days - thesis expired",
+                subject_type="thesis",
+                subject_id=thesis.id,
+            )
             continue
         try:
             order = executor.execute_thesis(
-                db, thesis, approved_by=f"investor_agent(L{settings.autonomy_level})")
+                db, thesis, approved_by=f"investor_agent(L{settings.autonomy_level})"
+            )
             if order.status == OrderStatus.filled:
                 count += 1
         except executor.ExecutionRefused as exc:
-            record_event(db, event_type="order.refused",
-                         summary=f"{thesis.ticker}: {exc}",
-                         subject_type="thesis", subject_id=thesis.id)
+            record_event(
+                db,
+                event_type="order.refused",
+                summary=f"{thesis.ticker}: {exc}",
+                subject_type="thesis",
+                subject_id=thesis.id,
+            )
             if "position already open" in str(exc):
                 thesis.status = ThesisStatus.rejected  # permanent: stop retrying
     return count
@@ -326,11 +384,15 @@ def _market_open_today() -> bool:
         try:
             import httpx
 
-            r = httpx.get(f"{settings.alpaca_paper_base_url}/v2/calendar",
-                          params={"start": today, "end": today},
-                          headers={"APCA-API-KEY-ID": settings.alpaca_api_key,
-                                   "APCA-API-SECRET-KEY": settings.alpaca_api_secret},
-                          timeout=15)
+            r = httpx.get(
+                f"{settings.alpaca_paper_base_url}/v2/calendar",
+                params={"start": today, "end": today},
+                headers={
+                    "APCA-API-KEY-ID": settings.alpaca_api_key,
+                    "APCA-API-SECRET-KEY": settings.alpaca_api_secret,
+                },
+                timeout=15,
+            )
             if r.status_code == 200:
                 is_open = any(d.get("date") == today for d in r.json())
         except Exception as exc:
@@ -355,10 +417,14 @@ def market_session_open() -> bool | None:
         try:
             import httpx
 
-            r = httpx.get(f"{settings.alpaca_paper_base_url}/v2/clock",
-                          headers={"APCA-API-KEY-ID": settings.alpaca_api_key,
-                                   "APCA-API-SECRET-KEY": settings.alpaca_api_secret},
-                          timeout=10)
+            r = httpx.get(
+                f"{settings.alpaca_paper_base_url}/v2/clock",
+                headers={
+                    "APCA-API-KEY-ID": settings.alpaca_api_key,
+                    "APCA-API-SECRET-KEY": settings.alpaca_api_secret,
+                },
+                timeout=10,
+            )
             if r.status_code == 200:
                 is_open = bool(r.json().get("is_open"))
         except Exception as exc:
@@ -396,8 +462,7 @@ def market_regime(db: Session) -> dict:
     else:
         detail = "filter disabled"
     _regime_cache.update(date=today, risk_on=risk_on, detail=detail)
-    _upsert_state(db, "market_regime",
-                  {"date": today, "risk_on": risk_on, "detail": detail})
+    _upsert_state(db, "market_regime", {"date": today, "risk_on": risk_on, "detail": detail})
     return dict(_regime_cache)
 
 
@@ -411,8 +476,7 @@ def update_counterfactuals(db: Session, max_quotes: int = 10) -> int:
 
     now = utcnow()
     done = 0
-    rows = db.scalars(select(ScreenCandidate).where(
-        ScreenCandidate.fwd_20d_pct.is_(None))).all()
+    rows = db.scalars(select(ScreenCandidate).where(ScreenCandidate.fwd_20d_pct.is_(None))).all()
     for row in rows:
         if done >= max_quotes:
             break
@@ -439,8 +503,9 @@ def update_counterfactuals(db: Session, max_quotes: int = 10) -> int:
     return done
 
 
-def run_post_mortems(session_factory: Callable[[], Session],
-                     router: ModelRouter, outcome_ids: list) -> list[str]:
+def run_post_mortems(
+    session_factory: Callable[[], Session], router: ModelRouter, outcome_ids: list
+) -> list[str]:
     """One cheap LLM call per closed position: what should future
     committees learn? Lessons feed the investor's context."""
     from midas.models import TradeOutcome
@@ -451,43 +516,58 @@ def run_post_mortems(session_factory: Callable[[], Session],
             outcome = db.get(TradeOutcome, oid)
             if outcome is None:
                 continue
-            existing = db.scalar(select(PipelineRun).where(
-                PipelineRun.kind == RunKind.post_mortem,
-                PipelineRun.position_id == outcome.position_id))
+            existing = db.scalar(
+                select(PipelineRun).where(
+                    PipelineRun.kind == RunKind.post_mortem,
+                    PipelineRun.position_id == outcome.position_id,
+                )
+            )
             if existing is not None:
                 continue  # once per position, ever
             position = db.get(Position, outcome.position_id)
             thesis = db.get(TradeThesis, outcome.thesis_id)
             if position is None or thesis is None:
                 continue  # orphaned outcome: nothing to learn from
-            run = PipelineRun(kind=RunKind.post_mortem, ticker=position.ticker,
-                              position_id=position.id)
+            run = PipelineRun(
+                kind=RunKind.post_mortem, ticker=position.ticker, position_id=position.id
+            )
             db.add(run)
             db.flush()
-            record = render_content({
-                "thesis": {"direction": thesis.direction.value,
-                           "instrument": thesis.instrument.value,
-                           "entry_zone": [thesis.entry_zone_low,
-                                          thesis.entry_zone_high],
-                           "stop": thesis.stop_price,
-                           "targets": thesis.targets,
-                           "summary": thesis.thesis_summary,
-                           "invalidators": thesis.invalidators},
-                "position": {"symbol": position.symbol, "qty": position.qty,
-                             "entry": position.avg_price,
-                             "opened_at": str(position.opened_at),
-                             "closed_at": str(position.closed_at)},
-                "outcome": {"pnl_usd": outcome.pnl_usd,
-                            "pnl_pct": outcome.pnl_pct,
-                            "holding_days": outcome.holding_days,
-                            "exit_kind": outcome.exit_kind},
-            })
+            record = render_content(
+                {
+                    "thesis": {
+                        "direction": thesis.direction.value,
+                        "instrument": thesis.instrument.value,
+                        "entry_zone": [thesis.entry_zone_low, thesis.entry_zone_high],
+                        "stop": thesis.stop_price,
+                        "targets": thesis.targets,
+                        "summary": thesis.thesis_summary,
+                        "invalidators": thesis.invalidators,
+                    },
+                    "position": {
+                        "symbol": position.symbol,
+                        "qty": position.qty,
+                        "entry": position.avg_price,
+                        "opened_at": str(position.opened_at),
+                        "closed_at": str(position.closed_at),
+                    },
+                    "outcome": {
+                        "pnl_usd": outcome.pnl_usd,
+                        "pnl_pct": outcome.pnl_pct,
+                        "holding_days": outcome.holding_days,
+                        "exit_kind": outcome.exit_kind,
+                    },
+                }
+            )
             try:
                 _, pm = run_agent_stage(
-                    db, router, run, AGENT_DEFS["postmortem"],
-                    task_text=("Write the post-mortem for this closed "
-                               "position.\n\n" + record),
-                    ticker=position.ticker)
+                    db,
+                    router,
+                    run,
+                    AGENT_DEFS["postmortem"],
+                    task_text=("Write the post-mortem for this closed position.\n\n" + record),
+                    ticker=position.ticker,
+                )
                 run.status = RunStatus.done
                 lessons.append(pm.lesson)
             except Exception:
@@ -500,9 +580,12 @@ def run_post_mortems(session_factory: Callable[[], Session],
 def recent_lessons(db: Session, limit: int = 5) -> list[str]:
     from midas.models import ArtifactType
 
-    arts = db.scalars(select(ResearchArtifact).where(
-        ResearchArtifact.artifact_type == ArtifactType.post_mortem)
-        .order_by(ResearchArtifact.created_at.desc()).limit(limit)).all()
+    arts = db.scalars(
+        select(ResearchArtifact)
+        .where(ResearchArtifact.artifact_type == ArtifactType.post_mortem)
+        .order_by(ResearchArtifact.created_at.desc())
+        .limit(limit)
+    ).all()
     return [a.content.get("lesson", "") for a in arts if a.content.get("lesson")]
 
 
@@ -531,13 +614,11 @@ def _upsert_state(db: Session, key: str, value: dict) -> None:
     db.flush()
 
 
-def maybe_auto_cycle(session_factory: Callable[[], Session],
-                     router: ModelRouter) -> dict | None:
+def maybe_auto_cycle(session_factory: Callable[[], Session], router: ModelRouter) -> dict | None:
     """Budget-aware cadence: on configured weekdays (AUTO_CYCLE_WEEKDAYS,
     e.g. "mon,thu"), run one screen + committees on gate-passers per day.
     Empty config = fully manual. Theses still obey the autonomy ladder."""
-    days = {d.strip().lower()[:3] for d in settings.auto_cycle_weekdays.split(",")
-            if d.strip()}
+    days = {d.strip().lower()[:3] for d in settings.auto_cycle_weekdays.split(",") if d.strip()}
     if not days or utcnow().strftime("%a").lower()[:3] not in days:
         return None
     if settings.auto_cycle_market_hours_only and not _us_market_hours():
@@ -545,8 +626,7 @@ def maybe_auto_cycle(session_factory: Callable[[], Session],
     if not _market_open_today():
         return None  # holidays: a 'weekday' with no market is not a trading day
     with session_factory() as db:
-        if (not market_regime(db)["risk_on"]
-                and settings.regime_throttle <= 0):
+        if not market_regime(db)["risk_on"] and settings.regime_throttle <= 0:
             return None  # binary risk-off: no research spend on refused entries
     from datetime import datetime as _dt
 
@@ -561,10 +641,8 @@ def maybe_auto_cycle(session_factory: Callable[[], Session],
         row = db.get(SystemState, "last_auto_cycle")
         val = dict(row.value) if row else {}
     if str(val.get("at", ""))[:10] == utcnow().date().isoformat():
-        stuck = [t for t, s in (val.get("results") or {}).items()
-                 if s == "committee running..."]
-        age_min = (utcnow() - aware(_dt.fromisoformat(val["at"]))
-                   ).total_seconds() / 60
+        stuck = [t for t, s in (val.get("results") or {}).items() if s == "committee running..."]
+        age_min = (utcnow() - aware(_dt.fromisoformat(val["at"]))).total_seconds() / 60
         if not stuck or age_min < 20:
             return None  # cycle done, or another process is mid-cycle
         # cycle died mid-committees: finish ONLY the stuck ones
@@ -593,27 +671,33 @@ def maybe_auto_cycle(session_factory: Callable[[], Session],
             logger.exception("deep scan failed; screening universe only")
     content = run_screen(session_factory, router)
     results = {}
-    candidates = sorted(content.get("candidates", []),
-                        key=lambda c: c.get("score", 0), reverse=True)
+    candidates = sorted(
+        content.get("candidates", []), key=lambda c: c.get("score", 0), reverse=True
+    )
     with session_factory() as db:
         held = {p.ticker for p in risk_engine.open_positions(db)}
     fresh = [c for c in candidates if c.get("ticker") not in held]
     for cand in candidates:
         if cand.get("ticker") in held:
             results[cand["ticker"]] = "skipped (already held - PM covers it)"
-    kept = fresh[:max(settings.auto_cycle_max_committees, 0)]
-    for cand in fresh[len(kept):]:
+    kept = fresh[: max(settings.auto_cycle_max_committees, 0)]
+    for cand in fresh[len(kept) :]:
         results[cand["ticker"]] = "skipped (committee cap)"
 
     def _persist():
         with session_factory() as db:
-            _upsert_state(db, "last_auto_cycle", {
-                "at": utcnow().isoformat(),
-                "screened": len(candidates),
-                "candidates": [{"ticker": c.get("ticker"),
-                                "score": c.get("score")} for c in candidates],
-                "results": dict(results),
-            })
+            _upsert_state(
+                db,
+                "last_auto_cycle",
+                {
+                    "at": utcnow().isoformat(),
+                    "screened": len(candidates),
+                    "candidates": [
+                        {"ticker": c.get("ticker"), "score": c.get("score")} for c in candidates
+                    ],
+                    "results": dict(results),
+                },
+            )
             db.commit()
 
     _persist()  # visible in the UI even while committees are still running
@@ -656,8 +740,7 @@ def premarket_gap_sweep(db: Session) -> list[str]:
 
     flagged: list[str] = []
     now = utcnow()
-    for p in db.scalars(select(Position).where(
-            Position.status == PositionStatus.open)):
+    for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
         ticker = p.ticker
         if p.next_review_at is not None and aware(p.next_review_at) <= now:
             continue  # already due
@@ -675,15 +758,16 @@ def premarket_gap_sweep(db: Session) -> list[str]:
         if abs(gap_pct) >= settings.premarket_gap_alert_pct:
             p.next_review_at = now  # due on the first open-session pass
             record_event(
-                db, event_type="premarket.gap_flagged",
+                db,
+                event_type="premarket.gap_flagged",
                 summary=f"{p.symbol}: premarket {gap_pct:+.1f}% vs prev close "
-                        f"- review scheduled for the open",
-                actor_type=ActorType.system, subject_type="position",
+                f"- review scheduled for the open",
+                actor_type=ActorType.system,
+                subject_type="position",
                 subject_id=p.id,
             )
             flagged.append(ticker)
-    _upsert_state(db, "last_premarket_sweep",
-                  {"at": utcnow().isoformat(), "flagged": flagged})
+    _upsert_state(db, "last_premarket_sweep", {"at": utcnow().isoformat(), "flagged": flagged})
     db.flush()
     return flagged
 
@@ -698,9 +782,11 @@ def ratchet_stops(db: Session) -> list[dict]:
     changes: list[dict] = []
     if settings.breakeven_at_r <= 0:
         return changes
-    for p in db.scalars(select(Position).where(
-            Position.status == PositionStatus.open,
-            Position.instrument == Instrument.shares)):
+    for p in db.scalars(
+        select(Position).where(
+            Position.status == PositionStatus.open, Position.instrument == Instrument.shares
+        )
+    ):
         thesis = db.get(TradeThesis, p.thesis_id)
         if thesis is None or thesis.direction != Direction.bullish:
             continue
@@ -710,15 +796,15 @@ def ratchet_stops(db: Session) -> list[dict]:
             continue
         r0 = p.avg_price - (thesis.stop_price or 0.0)
         new_stop = stop
-        if (r0 > 0 and stop < p.avg_price
-                and mark >= p.avg_price + settings.breakeven_at_r * r0):
+        if r0 > 0 and stop < p.avg_price and mark >= p.avg_price + settings.breakeven_at_r * r0:
             new_stop = p.avg_price
         if new_stop >= p.avg_price:  # at/past breakeven: trail the lows
             try:
                 bars = get_daily_bars(p.ticker, settings.trail_lookback_days).data
                 if bars:
-                    trail = round(float(min(
-                        b["low"] for b in bars[-settings.trail_lookback_days:])), 2)
+                    trail = round(
+                        float(min(b["low"] for b in bars[-settings.trail_lookback_days :])), 2
+                    )
                     if trail < mark:  # a trail at/above market is no trail
                         new_stop = max(new_stop, trail)
             except Exception:
@@ -728,14 +814,15 @@ def ratchet_stops(db: Session) -> list[dict]:
         if new_stop > stop + 0.005:
             p.stop_price = round(new_stop, 2)
             record_event(
-                db, event_type="stop.ratcheted",
+                db,
+                event_type="stop.ratcheted",
                 summary=f"{p.symbol}: stop {round(stop, 2)} -> {p.stop_price} "
-                        f"(mark {round(mark, 2)}, entry {round(p.avg_price, 2)})",
-                actor_type=ActorType.system, subject_type="position",
+                f"(mark {round(mark, 2)}, entry {round(p.avg_price, 2)})",
+                actor_type=ActorType.system,
+                subject_type="position",
                 subject_id=p.id,
             )
-            changes.append({"symbol": p.symbol, "from": round(stop, 2),
-                            "to": p.stop_price})
+            changes.append({"symbol": p.symbol, "from": round(stop, 2), "to": p.stop_price})
     db.flush()
     return changes
 
@@ -749,33 +836,40 @@ def apply_time_stops(db: Session) -> list[str]:
         return []
     out: list[str] = []
     now = utcnow()
-    for p in db.scalars(select(Position).where(
-            Position.status == PositionStatus.open)):
+    for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
         days = (now - aware(p.opened_at)).days
         if days < settings.max_holding_days:
             continue
-        pending = db.scalar(select(ApprovalRequest).where(
-            ApprovalRequest.subject_type == "order_proposal",
-            ApprovalRequest.subject_id == p.id,
-            ApprovalRequest.status == ApprovalStatus.pending))
+        pending = db.scalar(
+            select(ApprovalRequest).where(
+                ApprovalRequest.subject_type == "order_proposal",
+                ApprovalRequest.subject_id == p.id,
+                ApprovalRequest.status == ApprovalStatus.pending,
+            )
+        )
         if pending is not None:
             continue  # already waiting on the operator
         record_event(
-            db, event_type="stop.time",
-            summary=f"{p.symbol}: time stop after {days}d "
-                    f"(limit {settings.max_holding_days}d)",
-            actor_type=ActorType.system, subject_type="position", subject_id=p.id,
+            db,
+            event_type="stop.time",
+            summary=f"{p.symbol}: time stop after {days}d (limit {settings.max_holding_days}d)",
+            actor_type=ActorType.system,
+            subject_type="position",
+            subject_id=p.id,
         )
         executor.propose_or_execute_exit(
-            db, p, decision="exit",
-            reasons=[f"time stop: held {days} days >= "
-                     f"{settings.max_holding_days}-day limit"])
+            db,
+            p,
+            decision="exit",
+            reasons=[f"time stop: held {days} days >= {settings.max_holding_days}-day limit"],
+        )
         out.append(p.symbol)
     return out
 
 
-def maybe_portfolio_review(session_factory: Callable[[], Session],
-                           router: ModelRouter) -> dict | None:
+def maybe_portfolio_review(
+    session_factory: Callable[[], Session], router: ModelRouter
+) -> dict | None:
     """Once per day, after re-evaluations: the portfolio-manager agent
     reviews the WHOLE book against the freshest committee research and the
     exposure budget. Trim/exit decisions route through the autonomy ladder
@@ -790,10 +884,14 @@ def maybe_portfolio_review(session_factory: Callable[[], Session],
         if not positions:
             return None
         day_start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        already = [r for r in db.scalars(select(PipelineRun).where(
-            PipelineRun.kind == RunKind.portfolio_review))
+        already = [
+            r
+            for r in db.scalars(
+                select(PipelineRun).where(PipelineRun.kind == RunKind.portfolio_review)
+            )
             if aware(r.created_at) >= day_start
-            and r.status not in (RunStatus.failed, RunStatus.cancelled)]
+            and r.status not in (RunStatus.failed, RunStatus.cancelled)
+        ]
         if already:
             return None
 
@@ -808,38 +906,48 @@ def maybe_portfolio_review(session_factory: Callable[[], Session],
         for p in positions:
             thesis = db.get(TradeThesis, p.thesis_id)
             entry: dict[str, Any] = {
-                "ticker": p.ticker, "symbol": p.symbol,
-                "instrument": p.instrument.value, "qty": p.qty,
-                "avg_price": p.avg_price, "mark": p.last_mark_price,
-                "sector": p.sector, "opened_at": str(p.opened_at),
+                "ticker": p.ticker,
+                "symbol": p.symbol,
+                "instrument": p.instrument.value,
+                "qty": p.qty,
+                "avg_price": p.avg_price,
+                "mark": p.last_mark_price,
+                "sector": p.sector,
+                "opened_at": str(p.opened_at),
                 "thesis_summary": thesis.thesis_summary if thesis else "",
                 "stop_price": thesis.stop_price if thesis else None,
                 "targets": thesis.targets if thesis else [],
                 "invalidators": thesis.invalidators if thesis else [],
             }
             fresh: dict[str, dict] = {}
-            for at in (ArtifactType.verdict, ArtifactType.bull_case,
-                       ArtifactType.bear_case):
+            for at in (ArtifactType.verdict, ArtifactType.bull_case, ArtifactType.bear_case):
                 art = latest_artifact_for_ticker(db, p.ticker, at)
                 if art is not None:
-                    fresh[at.value] = {"created_at": str(art.created_at),
-                                       "content": art.content}
+                    fresh[at.value] = {"created_at": str(art.created_at), "content": art.content}
             entry["latest_research"] = fresh
             book.append(entry)
 
-        context = render_content({
-            "account_equity": round(equity, 2),
-            "deployed_notional": round(deployed, 2),
-            "exposure_budget": round(budget, 2),
-            "max_open_positions": settings.max_open_positions,
-            "open_positions": book,
-        }, limit=24000)
+        context = render_content(
+            {
+                "account_equity": round(equity, 2),
+                "deployed_notional": round(deployed, 2),
+                "exposure_budget": round(budget, 2),
+                "max_open_positions": settings.max_open_positions,
+                "open_positions": book,
+            },
+            limit=24000,
+        )
 
         try:
             artifact, review = run_agent_stage(
-                db, router, run, AGENT_DEFS["portfolio-manager"],
-                task_text=("Review this ENTIRE portfolio. Decide hold/trim/"
-                           "exit for every open position.\n\n" + context),
+                db,
+                router,
+                run,
+                AGENT_DEFS["portfolio-manager"],
+                task_text=(
+                    "Review this ENTIRE portfolio. Decide hold/trim/"
+                    "exit for every open position.\n\n" + context
+                ),
             )
         except Exception:
             run.status = RunStatus.failed
@@ -848,24 +956,33 @@ def maybe_portfolio_review(session_factory: Callable[[], Session],
 
         results: dict = {"assessment": review.assessment[:300]}
         for action in review.actions:
-            pos = next((p for p in positions
-                        if p.ticker == action.ticker and
-                        p.status == PositionStatus.open), None)
+            pos = next(
+                (
+                    p
+                    for p in positions
+                    if p.ticker == action.ticker and p.status == PositionStatus.open
+                ),
+                None,
+            )
             if pos is None or action.decision == "hold":
                 results[action.ticker] = action.decision
                 continue
             executor.propose_or_execute_exit(
-                db, pos, decision=action.decision, reasons=action.reasons,
+                db,
+                pos,
+                decision=action.decision,
+                reasons=action.reasons,
                 artifact_id=artifact.id,
             )
-            results[action.ticker] = (
-                f"{action.decision} routed (L{settings.autonomy_level})")
+            results[action.ticker] = f"{action.decision} routed (L{settings.autonomy_level})"
             record_event(
-                db, event_type="portfolio.action",
-                summary=f"PM: {action.decision} {pos.symbol} - "
-                        f"{'; '.join(action.reasons)[:200]}",
-                actor_type=ActorType.agent, run_id=run.id,
-                subject_type="position", subject_id=pos.id,
+                db,
+                event_type="portfolio.action",
+                summary=f"PM: {action.decision} {pos.symbol} - {'; '.join(action.reasons)[:200]}",
+                actor_type=ActorType.agent,
+                run_id=run.id,
+                subject_type="position",
+                subject_id=pos.id,
             )
         run.status = RunStatus.done
         db.commit()
@@ -885,18 +1002,35 @@ def _strategy_fingerprint() -> str:
     from midas.agents.defs import PROMPTS_DIR
 
     h = hashlib.sha256()
-    caps = {k: getattr(settings, k) for k in (
-        "per_trade_risk_pct", "max_notional_pct_per_trade",
-        "max_total_notional_pct", "max_premium_pct_per_trade",
-        "max_total_premium_pct", "daily_loss_limit_pct",
-        "weekly_loss_limit_pct", "max_open_positions",
-        "max_positions_per_sector", "max_sector_notional_pct",
-        "min_dte_at_entry", "min_open_interest", "max_bid_ask_spread_pct",
-        "max_holding_days", "breakeven_at_r", "trail_lookback_days",
-        "option_slippage_pct", "option_fee_per_contract",
-        "universe", "auto_cycle_max_committees",
-        "paper_starting_cash", "fractional_shares", "regime_throttle",
-        "regime_filter_enabled")}
+    caps = {
+        k: getattr(settings, k)
+        for k in (
+            "per_trade_risk_pct",
+            "max_notional_pct_per_trade",
+            "max_total_notional_pct",
+            "max_premium_pct_per_trade",
+            "max_total_premium_pct",
+            "daily_loss_limit_pct",
+            "weekly_loss_limit_pct",
+            "max_open_positions",
+            "max_positions_per_sector",
+            "max_sector_notional_pct",
+            "min_dte_at_entry",
+            "min_open_interest",
+            "max_bid_ask_spread_pct",
+            "max_holding_days",
+            "breakeven_at_r",
+            "trail_lookback_days",
+            "option_slippage_pct",
+            "option_fee_per_contract",
+            "universe",
+            "auto_cycle_max_committees",
+            "paper_starting_cash",
+            "fractional_shares",
+            "regime_throttle",
+            "regime_filter_enabled",
+        )
+    }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())
     try:
         h.update((Path(providers.__file__).parent / "routing.yaml").read_bytes())
@@ -916,27 +1050,40 @@ def _record_l2_ledger(db: Session) -> None:
     row = db.get(SystemState, "l2_since")
     if settings.autonomy_level >= 2:
         fp = _strategy_fingerprint()
-        changed = (row is not None and row.value.get("at")
-                   and row.value.get("fingerprint") not in (None, fp))
+        changed = (
+            row is not None
+            and row.value.get("at")
+            and row.value.get("fingerprint") not in (None, fp)
+        )
         if row is None or not row.value.get("at") or changed:
-            value = {"at": utcnow().isoformat(),
-                     "autonomy": settings.autonomy_level,
-                     "universe": settings.universe,
-                     "fingerprint": fp}
+            value = {
+                "at": utcnow().isoformat(),
+                "autonomy": settings.autonomy_level,
+                "universe": settings.universe,
+                "fingerprint": fp,
+            }
             if row is None:
                 db.add(SystemState(key="l2_since", value=value))
             else:
                 row.value = value
             record_event(
-                db, event_type="autonomy.l2_started",
-                summary=("L2 evidence clock RESTARTED - strategy fingerprint "
-                         "changed" if changed else "L2 evidence clock started"),
-                actor_type=ActorType.system)
+                db,
+                event_type="autonomy.l2_started",
+                summary=(
+                    "L2 evidence clock RESTARTED - strategy fingerprint changed"
+                    if changed
+                    else "L2 evidence clock started"
+                ),
+                actor_type=ActorType.system,
+            )
     elif row is not None and row.value.get("at"):
         row.value = {}
-        record_event(db, event_type="autonomy.l2_reset",
-                     summary="autonomy dropped below L2 - evidence clock reset",
-                     actor_type=ActorType.system)
+        record_event(
+            db,
+            event_type="autonomy.l2_reset",
+            summary="autonomy dropped below L2 - evidence clock reset",
+            actor_type=ActorType.system,
+        )
     db.flush()
 
 
@@ -962,8 +1109,10 @@ def acquire_pass_lock(db: Session) -> str | None:
         except ValueError:
             pass
     token = _uuid.uuid4().hex
-    value = {"holder": token,
-             "expires_at": (now + timedelta(minutes=PASS_LOCK_TTL_MINUTES)).isoformat()}
+    value = {
+        "holder": token,
+        "expires_at": (now + timedelta(minutes=PASS_LOCK_TTL_MINUTES)).isoformat(),
+    }
     if row is None:
         db.add(SystemState(key=PASS_LOCK_KEY, value=value))
     else:
@@ -982,9 +1131,9 @@ def release_pass_lock(db: Session, token: str) -> None:
         db.commit()
 
 
-def run_monitor_once(session_factory: Callable[[], Session],
-                     router: ModelRouter,
-                     interval_minutes: int | None = None) -> dict:
+def run_monitor_once(
+    session_factory: Callable[[], Session], router: ModelRouter, interval_minutes: int | None = None
+) -> dict:
     with session_factory() as db:
         token = acquire_pass_lock(db)
     if token is None:
@@ -996,15 +1145,21 @@ def run_monitor_once(session_factory: Callable[[], Session],
             release_pass_lock(db, token)
 
 
-def _run_monitor_pass(session_factory: Callable[[], Session],
-                      router: ModelRouter,
-                      interval_minutes: int | None = None) -> dict:
+def _run_monitor_pass(
+    session_factory: Callable[[], Session], router: ModelRouter, interval_minutes: int | None = None
+) -> dict:
     """One monitor pass. Returns a summary dict for the CLI/logs."""
     from midas.config import reload_settings
 
     reload_settings()  # Settings-tab changes apply within one pass
-    summary: dict[str, Any] = {"swept": 0, "executed": 0, "reviewed": [], "scored": 0,
-               "halted": None, "auto_cycle": None}
+    summary: dict[str, Any] = {
+        "swept": 0,
+        "executed": 0,
+        "reviewed": [],
+        "scored": 0,
+        "halted": None,
+        "auto_cycle": None,
+    }
     with session_factory() as db:
         summary["swept"] = sweep_stale_runs(db)
         equity = paper_broker.refresh_equity(db)
@@ -1015,17 +1170,27 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
         if settings.alpaca_mirror_orders:
             broker_acct = paper_broker.fetch_alpaca_account()
         if broker_acct and broker_acct["equity"] > 0:
-            _upsert_state(db, "broker_equity", {
-                "at": utcnow().isoformat(), "alpaca": broker_acct["equity"],
-                "internal": round(equity, 2)})
+            _upsert_state(
+                db,
+                "broker_equity",
+                {
+                    "at": utcnow().isoformat(),
+                    "alpaca": broker_acct["equity"],
+                    "internal": round(equity, 2),
+                },
+            )
             div_pct = abs(equity - broker_acct["equity"]) / broker_acct["equity"] * 100
             if div_pct > 3.0:
                 record_event(
-                    db, event_type="ops.alert",
-                    summary=(f"BOOKS DIVERGENCE {div_pct:.1f}%: internal equity "
-                             f"{equity:,.0f} vs Alpaca {broker_acct['equity']:,.0f}"
-                             f" - one ledger is wrong; investigate before trusting either"),
-                    actor_type=ActorType.system)
+                    db,
+                    event_type="ops.alert",
+                    summary=(
+                        f"BOOKS DIVERGENCE {div_pct:.1f}%: internal equity "
+                        f"{equity:,.0f} vs Alpaca {broker_acct['equity']:,.0f}"
+                        f" - one ledger is wrong; investigate before trusting either"
+                    ),
+                    actor_type=ActorType.system,
+                )
         risk_engine.update_equity_anchors(db, equity)
         _record_l2_ledger(db)
         halt_reason = risk_engine.enforce_loss_halt(db, equity)
@@ -1040,8 +1205,7 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
         summary["regime"] = regime["detail"] + (" [RISK-OFF]" if not regime["risk_on"] else "")
         summary["premarket_flags"] = premarket_gap_sweep(db)
         regime_ok = regime["risk_on"] or settings.regime_throttle > 0
-        summary["executed"] = (execute_approved_theses(db)
-                               if session_open and regime_ok else 0)
+        summary["executed"] = execute_approved_theses(db) if session_open and regime_ok else 0
         summary["stops_ratcheted"] = ratchet_stops(db)
         summary["time_stops"] = apply_time_stops(db) if session_open else []
         try:
@@ -1060,16 +1224,17 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
         try:
             if not session_open:
                 continue  # closed market: no honest fill exists ANYWHERE -
-                          # breaches wait for the open (GTC stops fire there
-                          # first anyway); reviews would read stale data
+                # breaches wait for the open (GTC stops fire there
+                # first anyway); reviews would read stale data
             if trigger == CheckpointTrigger.invalidation:
                 decision = execute_stop_exit(session_factory, position_id, reason)
             else:
-                decision = reevaluate_position(session_factory, router,
-                                               position_id, trigger, reason)
-            summary["reviewed"].append({"position_id": str(position_id),
-                                        "trigger": trigger.value,
-                                        "decision": decision})
+                decision = reevaluate_position(
+                    session_factory, router, position_id, trigger, reason
+                )
+            summary["reviewed"].append(
+                {"position_id": str(position_id), "trigger": trigger.value, "decision": decision}
+            )
         except Exception:
             logger.exception("re-evaluation failed for position %s", position_id)
 
@@ -1104,12 +1269,15 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
         from midas.models import SystemState
 
         hb = db.get(SystemState, "monitor_heartbeat")
-        value = {"at": utcnow().isoformat(),
-                 "next_pass_at": ((utcnow() + timedelta(
-                     minutes=interval_minutes)).isoformat()
-                     if interval_minutes else None),
-                 "summary": {k: v for k, v in summary.items()
-                             if k in ("executed", "scored", "halted")}}
+        value = {
+            "at": utcnow().isoformat(),
+            "next_pass_at": (
+                (utcnow() + timedelta(minutes=interval_minutes)).isoformat()
+                if interval_minutes
+                else None
+            ),
+            "summary": {k: v for k, v in summary.items() if k in ("executed", "scored", "halted")},
+        }
         if hb is None:
             db.add(SystemState(key="monitor_heartbeat", value=value))
         else:

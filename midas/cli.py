@@ -1,19 +1,20 @@
 """Midas CLI - the operator's console.
 
-  midas init                    create the database
-  midas screen                  run the universe screen
-  midas run TICKER              run the committee pipeline for one ticker
-  midas cycle                   screen, then run the committee on every candidate
-  midas digest [--days N]       weekly digest (the L2 review surface)
-  midas approvals               list pending approvals
-  midas approve ID [--deny]     resolve an approval (approving a thesis executes it)
-  midas positions               open positions + account
-  midas monitor [--loop]        one monitor pass (or run forever)
-  midas stats                   track record vs the L3 bar
-  midas halt [--clear]          show or clear the pipeline halt
-  midas audit [--limit N]       recent audit trail
-  midas ui [--port N]           launch the command center (local web console)
+midas init                    create the database
+midas screen                  run the universe screen
+midas run TICKER              run the committee pipeline for one ticker
+midas cycle                   screen, then run the committee on every candidate
+midas digest [--days N]       weekly digest (the L2 review surface)
+midas approvals               list pending approvals
+midas approve ID [--deny]     resolve an approval (approving a thesis executes it)
+midas positions               open positions + account
+midas monitor [--loop]        one monitor pass (or run forever)
+midas stats                   track record vs the L3 bar
+midas halt [--clear]          show or clear the pipeline halt
+midas audit [--limit N]       recent audit trail
+midas ui [--port N]           launch the command center (local web console)
 """
+
 import argparse
 import json
 import sys
@@ -23,8 +24,9 @@ from sqlalchemy import select
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="midas", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="midas", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init")
     sub.add_parser("screen")
@@ -50,8 +52,9 @@ def main() -> None:
     p_audit.add_argument("--limit", type=int, default=30)
     p_ui = sub.add_parser("ui")
     p_ui.add_argument("--port", type=int, default=8420)
-    p_ui.add_argument("--host", default="127.0.0.1",
-                      help="bind address (loopback only by default; no auth)")
+    p_ui.add_argument(
+        "--host", default="127.0.0.1", help="bind address (loopback only by default; no auth)"
+    )
     args = parser.parse_args()
 
     from midas.config import settings
@@ -78,7 +81,9 @@ def main() -> None:
         from midas.pipeline.committee import run_committee
 
         result = run_committee(
-            session_factory, get_router(), args.ticker,
+            session_factory,
+            get_router(),
+            args.ticker,
             resume_run_id=_uuid.UUID(args.resume) if args.resume else None,
         )
         print(f"{result.status.value}: {result.note} (run {result.run_id})")
@@ -104,8 +109,9 @@ def main() -> None:
         from midas.models import ApprovalRequest, ApprovalStatus
 
         with session_factory() as db:
-            pending = db.scalars(select(ApprovalRequest).where(
-                ApprovalRequest.status == ApprovalStatus.pending)).all()
+            pending = db.scalars(
+                select(ApprovalRequest).where(ApprovalRequest.status == ApprovalStatus.pending)
+            ).all()
             if not pending:
                 print("no pending approvals")
             for a in pending:
@@ -131,29 +137,32 @@ def main() -> None:
             refresh_equity(db)
             db.commit()
             account = get_account(db)
-            print(f"paper account: cash ${account['cash']:,.2f}  "
-                  f"equity ${account['equity']:,.2f}")
-            for p in db.scalars(select(Position).where(
-                    Position.status == PositionStatus.open)):
+            print(f"paper account: cash ${account['cash']:,.2f}  equity ${account['equity']:,.2f}")
+            for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
                 mark = p.last_mark_price or p.avg_price
                 mult = 100 if p.instrument.value == "option" else 1
                 upnl = (mark - p.avg_price) * p.qty * mult
-                print(f"  {p.symbol}: {p.qty:g} @ {p.avg_price} "
-                      f"(mark {mark}, uP&L {upnl:+.2f}, "
-                      f"next review {p.next_review_at})")
+                print(
+                    f"  {p.symbol}: {p.qty:g} @ {p.avg_price} "
+                    f"(mark {mark}, uP&L {upnl:+.2f}, "
+                    f"next review {p.next_review_at})"
+                )
     elif args.cmd == "monitor":
         import logging as _logging
 
         _logging.basicConfig(
             level=_logging.INFO,
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-            datefmt="%H:%M:%S")
+            datefmt="%H:%M:%S",
+        )
         from midas.scheduler.monitor import run_monitor_once
 
         while True:
             summary = run_monitor_once(
-                session_factory, get_router(),
-                interval_minutes=args.interval_minutes if args.loop else None)
+                session_factory,
+                get_router(),
+                interval_minutes=args.interval_minutes if args.loop else None,
+            )
             print(json.dumps(summary, indent=2, default=str))
             if not args.loop:
                 break
@@ -182,9 +191,9 @@ def main() -> None:
         from midas.models import AuditEvent
 
         with session_factory() as db:
-            events = db.scalars(select(AuditEvent)
-                                .order_by(AuditEvent.created_at.desc())
-                                .limit(args.limit)).all()
+            events = db.scalars(
+                select(AuditEvent).order_by(AuditEvent.created_at.desc()).limit(args.limit)
+            ).all()
             for e in reversed(events):
                 print(f"{e.created_at:%Y-%m-%d %H:%M} [{e.event_type}] {e.summary}")
 

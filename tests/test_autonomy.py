@@ -1,5 +1,6 @@
 """The autonomy ladder: config-capped, code-enforced. Levels 3+ (real
 money) must be unrepresentable in this codebase."""
+
 import pytest
 from sqlalchemy import select
 
@@ -63,8 +64,7 @@ def test_l1_auto_executes_entry_but_proposes_exits(factory, demo_router, monkeyp
         from midas.execution.executor import propose_or_execute_exit
 
         position = db.scalar(select(Position))
-        result = propose_or_execute_exit(db, position, decision="exit",
-                                         reasons=["test"])
+        result = propose_or_execute_exit(db, position, decision="exit", reasons=["test"])
         assert isinstance(result, ApprovalRequest)
 
 
@@ -75,10 +75,8 @@ def test_l2_auto_executes_exits(factory, demo_router, monkeypatch):
     with factory() as db:
         from midas.execution.executor import propose_or_execute_exit
 
-        position = db.scalar(select(Position).where(
-            Position.status == PositionStatus.open))
-        result = propose_or_execute_exit(db, position, decision="exit",
-                                         reasons=["test"])
+        position = db.scalar(select(Position).where(Position.status == PositionStatus.open))
+        result = propose_or_execute_exit(db, position, decision="exit", reasons=["test"])
         db.commit()
         assert isinstance(result, Order)
         assert result.status == OrderStatus.filled

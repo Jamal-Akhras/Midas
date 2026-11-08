@@ -4,6 +4,7 @@ Every tool result is stored as a DataSnapshot BEFORE the model sees it -
 the audit trail must show the data the decision saw. The executor wraps
 raw tool data with source + retrieved_at so agents can cite both.
 """
+
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,8 +37,7 @@ class Tool:
     fn: Callable[..., ToolResult]
 
     def spec(self) -> ToolSpec:
-        return ToolSpec(name=self.name, description=self.description,
-                        parameters=self.parameters)
+        return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
 
 
 class ToolContext:
@@ -66,8 +66,13 @@ class ToolContext:
             snap = DataSnapshot(
                 run_id=self.run_id,
                 ticker=(arguments.get("ticker") or self.ticker or "").upper(),
-                tool_name=name, params=arguments, data=data, source=source,
-                retrieved_at=retrieved_at, ok=ok, error=err,
+                tool_name=name,
+                params=arguments,
+                data=data,
+                source=source,
+                retrieved_at=retrieved_at,
+                ok=ok,
+                error=err,
             )
             self.db.add(snap)
             self.db.flush()
@@ -89,15 +94,14 @@ class ToolContext:
                 "retrieved_at": retrieved_at.isoformat(),
                 "data": data,
             }
+
         return execute
 
     def stamp_artifact(self, artifact_id) -> None:
         """Link every snapshot gathered so far to the artifact that used it."""
         if not self.snapshot_ids:
             return
-        for snap in self.db.query(DataSnapshot).filter(
-            DataSnapshot.id.in_(self.snapshot_ids)
-        ):
+        for snap in self.db.query(DataSnapshot).filter(DataSnapshot.id.in_(self.snapshot_ids)):
             snap.artifact_id = artifact_id
         self.db.flush()
         self.snapshot_ids = []

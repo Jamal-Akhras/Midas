@@ -1,5 +1,6 @@
 """Live mode must never serve demo fixtures: a missing data key fails
 loudly so the gap lands in 'unverified', not in the dossier as fact."""
+
 import pytest
 
 from midas.config import settings
@@ -14,8 +15,14 @@ def live_no_data_keys(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", "sk-test")  # live mode on
     # every data key, including Alpaca (a news source): the suite must not
     # depend on what the operator's .env happens to contain
-    for key in ("finnhub_api_key", "fmp_api_key", "brave_api_key",
-                "tavily_api_key", "alpaca_api_key", "alpaca_api_secret"):
+    for key in (
+        "finnhub_api_key",
+        "fmp_api_key",
+        "brave_api_key",
+        "tavily_api_key",
+        "alpaca_api_key",
+        "alpaca_api_secret",
+    ):
         monkeypatch.setattr(settings, key, "")
 
 

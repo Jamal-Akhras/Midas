@@ -1,5 +1,6 @@
 """Universe screen: Screener Agent scans for setup candidates, then a
 deterministic filter re-checks price/volume floors on the cited numbers."""
+
 import logging
 from collections.abc import Callable
 
@@ -23,23 +24,37 @@ def discover_tickers() -> list[str]:
     committee still apply every floor and gate. Empty on any failure."""
     if settings.deep_scan_enabled:
         return []  # superseded: the deep scan does this job WITH floors -
-                   # most-actives-by-share-volume is structurally penny junk
-    if not (settings.discovery_enabled and settings.alpaca_api_key
-            and settings.alpaca_api_secret and not settings.effective_demo_mode):
+        # most-actives-by-share-volume is structurally penny junk
+    if not (
+        settings.discovery_enabled
+        and settings.alpaca_api_key
+        and settings.alpaca_api_secret
+        and not settings.effective_demo_mode
+    ):
         return []
     import httpx
 
-    headers = {"APCA-API-KEY-ID": settings.alpaca_api_key,
-               "APCA-API-SECRET-KEY": settings.alpaca_api_secret}
+    headers = {
+        "APCA-API-KEY-ID": settings.alpaca_api_key,
+        "APCA-API-SECRET-KEY": settings.alpaca_api_secret,
+    }
     found: list[str] = []
     top = max(int(settings.discovery_top), 0)
     try:
-        r = httpx.get(f"{settings.alpaca_data_base_url}/v1beta1/screener/stocks/most-actives",
-                      params={"by": "volume", "top": top}, headers=headers, timeout=15)
+        r = httpx.get(
+            f"{settings.alpaca_data_base_url}/v1beta1/screener/stocks/most-actives",
+            params={"by": "volume", "top": top},
+            headers=headers,
+            timeout=15,
+        )
         if r.status_code == 200:
             found += [x["symbol"] for x in r.json().get("most_actives") or []]
-        r = httpx.get(f"{settings.alpaca_data_base_url}/v1beta1/screener/stocks/movers",
-                      params={"top": top}, headers=headers, timeout=15)
+        r = httpx.get(
+            f"{settings.alpaca_data_base_url}/v1beta1/screener/stocks/movers",
+            params={"top": top},
+            headers=headers,
+            timeout=15,
+        )
         if r.status_code == 200:
             body = r.json()
             found += [x["symbol"] for x in (body.get("gainers") or [])]
@@ -47,8 +62,7 @@ def discover_tickers() -> list[str]:
         logger.warning("discovery failed: %s", type(exc).__name__)
         return []
     # plain common stock tickers only; skip weird symbols (units/warrants)
-    return [t.upper() for t in dict.fromkeys(found)
-            if t.isalpha() and 1 <= len(t) <= 5]
+    return [t.upper() for t in dict.fromkeys(found) if t.isalpha() and 1 <= len(t) <= 5]
 
 
 def universe_tickers() -> list[str]:
@@ -79,8 +93,13 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
         run = PipelineRun(kind=RunKind.screen)
         db.add(run)
         db.flush()
-        record_event(db, event_type="run.created", summary="Screen run created",
-                     actor_type=ActorType.operator, run_id=run.id)
+        record_event(
+            db,
+            event_type="run.created",
+            summary="Screen run created",
+            actor_type=ActorType.operator,
+            run_id=run.id,
+        )
         db.commit()
         run_id = run.id
 
@@ -98,7 +117,10 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
                     tickers.append(t)
         try:
             _, parsed = run_agent_stage(
-                db, router, run, AGENT_DEFS["screener"],
+                db,
+                router,
+                run,
+                AGENT_DEFS["screener"],
                 task_text=(
                     "Scan this universe for setup candidates. "
                     f"Universe: {', '.join(tickers)}\n"
@@ -117,26 +139,33 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
         content = parsed.model_dump()
         kept, dropped = [], []
         for cand in content["candidates"]:
-            if cand["price"] >= settings.min_price_usd and \
-                    cand["avg_volume"] >= settings.min_avg_daily_volume:
+            if (
+                cand["price"] >= settings.min_price_usd
+                and cand["avg_volume"] >= settings.min_avg_daily_volume
+            ):
                 kept.append(cand)
             else:
-                dropped.append({"ticker": cand["ticker"],
-                                "reason": "below price/volume floor"})
+                dropped.append({"ticker": cand["ticker"], "reason": "below price/volume floor"})
         content["candidates"] = kept
         content["floor_rejections"] = dropped
         from midas.models import ScreenCandidate
 
         for cand in kept:
-            db.add(ScreenCandidate(
-                run_id=run.id, ticker=str(cand.get("ticker", "")).upper(),
-                score=float(cand.get("score") or 0),
-                price_at_screen=float(cand.get("price") or 0)))
+            db.add(
+                ScreenCandidate(
+                    run_id=run.id,
+                    ticker=str(cand.get("ticker", "")).upper(),
+                    score=float(cand.get("score") or 0),
+                    price_at_screen=float(cand.get("price") or 0),
+                )
+            )
         run.status = RunStatus.done
         record_event(
-            db, event_type="run.completed",
+            db,
+            event_type="run.completed",
             summary=f"Screen kept {len(kept)} candidate(s), floor-dropped {len(dropped)}",
-            run_id=run.id, payload={"kept": [c["ticker"] for c in kept]},
+            run_id=run.id,
+            payload={"kept": [c["ticker"] for c in kept]},
         )
         db.commit()
         return content

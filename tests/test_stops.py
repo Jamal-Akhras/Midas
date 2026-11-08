@@ -1,4 +1,5 @@
 """Stop protection: breakeven ratchet, trailing, time stops, standing stops."""
+
 from datetime import timedelta
 
 from midas.config import settings
@@ -15,27 +16,41 @@ from midas.scheduler import monitor
 from midas.tools.base import ToolResult
 
 
-def _position(db, ticker="ACME", avg=100.0, thesis_stop=95.0, mark=None,
-              pos_stop=0.0, opened_days_ago=1):
+def _position(
+    db, ticker="ACME", avg=100.0, thesis_stop=95.0, mark=None, pos_stop=0.0, opened_days_ago=1
+):
     run = PipelineRun(kind=RunKind.committee, ticker=ticker)
     db.add(run)
     db.flush()
-    art = ResearchArtifact(run_id=run.id, ticker=ticker, agent_slug="investor",
-                           artifact_type="verdict", content={})
+    art = ResearchArtifact(
+        run_id=run.id, ticker=ticker, agent_slug="investor", artifact_type="verdict", content={}
+    )
     db.add(art)
     db.flush()
     thesis = TradeThesis(
-        run_id=run.id, verdict_artifact_id=art.id, ticker=ticker,
-        direction=Direction.bullish, instrument=Instrument.shares,
-        entry_zone_low=avg - 1, entry_zone_high=avg + 1, stop_price=thesis_stop,
+        run_id=run.id,
+        verdict_artifact_id=art.id,
+        ticker=ticker,
+        direction=Direction.bullish,
+        instrument=Instrument.shares,
+        entry_zone_low=avg - 1,
+        entry_zone_high=avg + 1,
+        stop_price=thesis_stop,
         status=ThesisStatus.executed,
     )
     db.add(thesis)
     db.flush()
-    p = Position(thesis_id=thesis.id, ticker=ticker, symbol=ticker,
-                 instrument=Instrument.shares, qty=10, avg_price=avg,
-                 stop_price=pos_stop, last_mark_price=mark,
-                 opened_at=utcnow() - timedelta(days=opened_days_ago))
+    p = Position(
+        thesis_id=thesis.id,
+        ticker=ticker,
+        symbol=ticker,
+        instrument=Instrument.shares,
+        qty=10,
+        avg_price=avg,
+        stop_price=pos_stop,
+        last_mark_price=mark,
+        opened_at=utcnow() - timedelta(days=opened_days_ago),
+    )
     db.add(p)
     db.flush()
     return p
@@ -43,9 +58,21 @@ def _position(db, ticker="ACME", avg=100.0, thesis_stop=95.0, mark=None,
 
 def _fake_bars(lows):
     def fake(ticker, days=10):
-        return ToolResult(data=[{"low": lo, "high": lo + 2, "open": lo + 1,
-                                 "close": lo + 1, "date": "2026-07-01",
-                                 "volume": 1e6} for lo in lows], source="test")
+        return ToolResult(
+            data=[
+                {
+                    "low": lo,
+                    "high": lo + 2,
+                    "open": lo + 1,
+                    "close": lo + 1,
+                    "date": "2026-07-01",
+                    "volume": 1e6,
+                }
+                for lo in lows
+            ],
+            source="test",
+        )
+
     return fake
 
 
@@ -129,9 +156,15 @@ def test_fail_closed_when_broker_unavailable(db, monkeypatch):
     monkeypatch.setattr(paper_broker, "mark_price", lambda db, o: 100.0)
     cash_before = paper_broker.get_account(db)["cash"]
     th = _position(db, ticker="ACME")  # gives us a valid thesis id
-    order = Order(thesis_id=th.thesis_id, side=OrderSide.buy, instrument=I.shares,
-                  symbol="ACME", qty=10, reason=OrderReason.entry,
-                  status=OrderStatus.approved)
+    order = Order(
+        thesis_id=th.thesis_id,
+        side=OrderSide.buy,
+        instrument=I.shares,
+        symbol="ACME",
+        qty=10,
+        reason=OrderReason.entry,
+        status=OrderStatus.approved,
+    )
     db.add(order)
     db.flush()
     paper_broker.submit(db, order)
@@ -147,9 +180,15 @@ def test_option_fills_carry_friction(db, monkeypatch):
     monkeypatch.setattr(paper_broker, "mark_price", lambda db, o: 4.0)
     cash_before = paper_broker.get_account(db)["cash"]
     th = _position(db, ticker="ACME")
-    order = Order(thesis_id=th.thesis_id, side=OrderSide.buy, instrument=I.option,
-                  symbol="ACME_2026-08-21_call_100.0", qty=2,
-                  reason=OrderReason.entry, status=OrderStatus.approved)
+    order = Order(
+        thesis_id=th.thesis_id,
+        side=OrderSide.buy,
+        instrument=I.option,
+        symbol="ACME_2026-08-21_call_100.0",
+        qty=2,
+        reason=OrderReason.entry,
+        status=OrderStatus.approved,
+    )
     db.add(order)
     db.flush()
     paper_broker.submit(db, order)
@@ -178,8 +217,9 @@ def test_unknown_sector_fails_closed(db, monkeypatch):
     p = db.query(Position).first()
     p.sector = ""
     db.flush()
-    rc = eng.check_shares_trade(db, account_equity=100_000,
-                                entry_price=100, stop_price=95, sector="")
+    rc = eng.check_shares_trade(
+        db, account_equity=100_000, entry_price=100, stop_price=95, sector=""
+    )
     assert not rc.ok
     assert not rc.checks["sector_concentration"]["ok"]
 

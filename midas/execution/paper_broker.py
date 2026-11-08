@@ -5,6 +5,7 @@ price; every fill is a snapshot-backed, audited event.
 There is NO real-money broker in this codebase. That is non-negotiable #1:
 the real-order code path does not exist until the L3 statistical bar is met.
 """
+
 import logging
 from typing import Any
 
@@ -31,6 +32,8 @@ from midas.tools.registry import TOOLS
 logger = logging.getLogger(__name__)
 
 ACCOUNT_KEY = "paper_account"
+
+
 def starting_cash() -> float:
     from midas.config import settings
 
@@ -40,9 +43,9 @@ def starting_cash() -> float:
 def get_account(db: Session) -> dict[str, Any]:
     row = db.get(SystemState, ACCOUNT_KEY)
     if row is None:
-        row = SystemState(key=ACCOUNT_KEY,
-                          value={"cash": starting_cash(),
-                                 "equity": starting_cash()})
+        row = SystemState(
+            key=ACCOUNT_KEY, value={"cash": starting_cash(), "equity": starting_cash()}
+        )
         db.add(row)
         db.flush()
     return dict(row.value)
@@ -71,8 +74,11 @@ def mark_price(db: Session, order: Order) -> float:
 
     def mid_of(strike: float) -> float:
         for c in chain:
-            if (c["expiry"] == detail["expiry"] and c["type"] == detail["type"]
-                    and float(c["strike"]) == strike):
+            if (
+                c["expiry"] == detail["expiry"]
+                and c["type"] == detail["type"]
+                and float(c["strike"]) == strike
+            ):
                 return float(c["mid"])
         raise LookupError(f"contract {order.symbol} not found in current chain")
 
@@ -83,8 +89,7 @@ def mark_price(db: Session, order: Order) -> float:
     return round(price, 4)
 
 
-def occ_symbol(underlying: str, expiry_iso: str, opt_type: str,
-               strike: float) -> str:
+def occ_symbol(underlying: str, expiry_iso: str, opt_type: str, strike: float) -> str:
     """OCC option symbol: AAPL 2025-01-17 call 190.0 -> AAPL250117C00190000."""
     y, m, d = expiry_iso.split("-")
     cp = "C" if opt_type == "call" else "P"
@@ -108,8 +113,11 @@ def alpaca_options_level() -> int | None:
     level = None
     if settings.alpaca_api_key and settings.alpaca_api_secret:
         try:
-            r = httpx.get(f"{settings.alpaca_paper_base_url}/v2/account",
-                          headers=_alpaca_headers(), timeout=15)
+            r = httpx.get(
+                f"{settings.alpaca_paper_base_url}/v2/account",
+                headers=_alpaca_headers(),
+                timeout=15,
+            )
             if r.status_code == 200:
                 level = int(r.json().get("options_trading_level") or 0)
         except Exception as exc:
@@ -127,26 +135,42 @@ def option_order_payload(order: Order, net_mid: float) -> dict | None:
     limit = round(net_mid * (1.02 if entry else 0.98), 2)
     if limit <= 0:
         return None
-    long_sym = occ_symbol(underlying, detail["expiry"], detail["type"],
-                          detail["strike"])
-    base = {"qty": str(int(order.qty)), "type": "limit",
-            "limit_price": f"{limit:.2f}", "time_in_force": "day",
-            "client_order_id": str(order.id)}
+    long_sym = occ_symbol(underlying, detail["expiry"], detail["type"], detail["strike"])
+    base = {
+        "qty": str(int(order.qty)),
+        "type": "limit",
+        "limit_price": f"{limit:.2f}",
+        "time_in_force": "day",
+        "client_order_id": str(order.id),
+    }
     if detail.get("short_strike") is None:
-        return {**base, "symbol": long_sym,
-                "side": "buy" if entry else "sell"}
-    short_sym = occ_symbol(underlying, detail["expiry"], detail["type"],
-                           detail["short_strike"])
+        return {**base, "symbol": long_sym, "side": "buy" if entry else "sell"}
+    short_sym = occ_symbol(underlying, detail["expiry"], detail["type"], detail["short_strike"])
     if entry:
-        legs = [{"symbol": long_sym, "ratio_qty": "1", "side": "buy",
-                 "position_intent": "buy_to_open"},
-                {"symbol": short_sym, "ratio_qty": "1", "side": "sell",
-                 "position_intent": "sell_to_open"}]
+        legs = [
+            {"symbol": long_sym, "ratio_qty": "1", "side": "buy", "position_intent": "buy_to_open"},
+            {
+                "symbol": short_sym,
+                "ratio_qty": "1",
+                "side": "sell",
+                "position_intent": "sell_to_open",
+            },
+        ]
     else:
-        legs = [{"symbol": long_sym, "ratio_qty": "1", "side": "sell",
-                 "position_intent": "sell_to_close"},
-                {"symbol": short_sym, "ratio_qty": "1", "side": "buy",
-                 "position_intent": "buy_to_close"}]
+        legs = [
+            {
+                "symbol": long_sym,
+                "ratio_qty": "1",
+                "side": "sell",
+                "position_intent": "sell_to_close",
+            },
+            {
+                "symbol": short_sym,
+                "ratio_qty": "1",
+                "side": "buy",
+                "position_intent": "buy_to_close",
+            },
+        ]
     return {**base, "order_class": "mleg", "legs": legs}
 
 
@@ -160,40 +184,41 @@ def _mirror_option_to_alpaca(order: Order, net_mid: float) -> tuple[float, str] 
 
     from midas.config import settings
 
-    if not (settings.alpaca_api_key and settings.alpaca_api_secret
-            and settings.alpaca_mirror_orders and settings.alpaca_mirror_options):
+    if not (
+        settings.alpaca_api_key
+        and settings.alpaca_api_secret
+        and settings.alpaca_mirror_orders
+        and settings.alpaca_mirror_options
+    ):
         return None
     _, detail = _parse_option_symbol(order.symbol)
     needed = 3 if detail.get("short_strike") is not None else 2
     level = alpaca_options_level()
     if level is None or level < needed:
-        logger.warning("options mirror needs level %s, account has %s; sim used",
-                       needed, level)
+        logger.warning("options mirror needs level %s, account has %s; sim used", needed, level)
         return None
     payload = option_order_payload(order, net_mid)
     if payload is None:
         return None
     base = settings.alpaca_paper_base_url
     try:
-        r = httpx.post(f"{base}/v2/orders", json=payload,
-                       headers=_alpaca_headers(), timeout=15)
+        r = httpx.post(f"{base}/v2/orders", json=payload, headers=_alpaca_headers(), timeout=15)
         if r.status_code not in (200, 201):
-            logger.warning("alpaca option mirror rejected (%s): %s",
-                           r.status_code, r.text[:200])
+            logger.warning("alpaca option mirror rejected (%s): %s", r.status_code, r.text[:200])
             return None
         alpaca_id = r.json()["id"]
         for _ in range(8):
             _time.sleep(1)
-            o = httpx.get(f"{base}/v2/orders/{alpaca_id}",
-                          headers=_alpaca_headers(), timeout=15).json()
+            o = httpx.get(
+                f"{base}/v2/orders/{alpaca_id}", headers=_alpaca_headers(), timeout=15
+            ).json()
             status = o.get("status")
             if status == "filled":
                 return float(o["filled_avg_price"]), alpaca_id
             if status in ("canceled", "rejected", "expired"):
                 logger.warning("alpaca option order %s: %s", alpaca_id, status)
                 return None
-        httpx.delete(f"{base}/v2/orders/{alpaca_id}",
-                     headers=_alpaca_headers(), timeout=15)
+        httpx.delete(f"{base}/v2/orders/{alpaca_id}", headers=_alpaca_headers(), timeout=15)
         logger.warning("alpaca option order %s unfilled; cancelled", alpaca_id)
         return None
     except Exception as exc:
@@ -201,8 +226,9 @@ def _mirror_option_to_alpaca(order: Order, net_mid: float) -> tuple[float, str] 
         return None
 
 
-def option_symbol(underlying: str, expiry: str, opt_type: str, strike: float,
-                  short_strike: float | None = None) -> str:
+def option_symbol(
+    underlying: str, expiry: str, opt_type: str, strike: float, short_strike: float | None = None
+) -> str:
     """Readable internal option symbol: TICKER_YYYY-MM-DD_call_185.0 (long)
     or ..._185.0x200.0 (debit spread). Human-auditable; swap for OCC format
     when a real chain needs it."""
@@ -214,17 +240,27 @@ def _parse_option_symbol(symbol: str) -> tuple[str, dict]:
     underlying, expiry, opt_type, strikes = symbol.split("_")
     if "x" in strikes:
         long_s, short_s = strikes.split("x")
-        return underlying, {"expiry": expiry, "type": opt_type,
-                            "strike": float(long_s), "short_strike": float(short_s)}
-    return underlying, {"expiry": expiry, "type": opt_type,
-                        "strike": float(strikes), "short_strike": None}
+        return underlying, {
+            "expiry": expiry,
+            "type": opt_type,
+            "strike": float(long_s),
+            "short_strike": float(short_s),
+        }
+    return underlying, {
+        "expiry": expiry,
+        "type": opt_type,
+        "strike": float(strikes),
+        "short_strike": None,
+    }
 
 
 def _alpaca_headers() -> dict:
     from midas.config import settings
 
-    return {"APCA-API-KEY-ID": settings.alpaca_api_key,
-            "APCA-API-SECRET-KEY": settings.alpaca_api_secret}
+    return {
+        "APCA-API-KEY-ID": settings.alpaca_api_key,
+        "APCA-API-SECRET-KEY": settings.alpaca_api_secret,
+    }
 
 
 def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
@@ -239,8 +275,9 @@ def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
 
     from midas.config import settings
 
-    if not (settings.alpaca_api_key and settings.alpaca_api_secret
-            and settings.alpaca_mirror_orders):
+    if not (
+        settings.alpaca_api_key and settings.alpaca_api_secret and settings.alpaca_mirror_orders
+    ):
         return None
     if order.instrument != Instrument.shares:
         return None  # options stay on the internal simulator
@@ -248,28 +285,27 @@ def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
     payload = {
         "symbol": order.symbol,
         "qty": str(int(order.qty)) if not fractional else str(round(order.qty, 3)),
-        "side": order.side.value, "time_in_force": "day",
+        "side": order.side.value,
+        "time_in_force": "day",
         # fractional orders are market-only at Alpaca; the internal limit
         # check against the entry zone still gates BEFORE we get here
-        "type": ("limit" if order.limit_price is not None and not fractional
-                 else "market"),
+        "type": ("limit" if order.limit_price is not None and not fractional else "market"),
         "client_order_id": str(order.id),  # exact reconciliation key
     }
     if order.limit_price is not None and not fractional:
         payload["limit_price"] = str(round(order.limit_price, 2))
     base = settings.alpaca_paper_base_url
     try:
-        r = httpx.post(f"{base}/v2/orders", json=payload,
-                       headers=_alpaca_headers(), timeout=15)
+        r = httpx.post(f"{base}/v2/orders", json=payload, headers=_alpaca_headers(), timeout=15)
         if r.status_code not in (200, 201):
-            logger.warning("alpaca mirror rejected (%s): %s",
-                           r.status_code, r.text[:200])
+            logger.warning("alpaca mirror rejected (%s): %s", r.status_code, r.text[:200])
             return None
         alpaca_id = r.json()["id"]
         for _ in range(8):
             _time.sleep(1)
-            o = httpx.get(f"{base}/v2/orders/{alpaca_id}",
-                          headers=_alpaca_headers(), timeout=15).json()
+            o = httpx.get(
+                f"{base}/v2/orders/{alpaca_id}", headers=_alpaca_headers(), timeout=15
+            ).json()
             status = o.get("status")
             if status == "filled":
                 return float(o["filled_avg_price"]), alpaca_id
@@ -277,10 +313,8 @@ def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
                 logger.warning("alpaca mirror order %s: %s", alpaca_id, status)
                 return None
         # not filled quickly (market closed / illiquid): cancel and simulate
-        httpx.delete(f"{base}/v2/orders/{alpaca_id}",
-                     headers=_alpaca_headers(), timeout=15)
-        logger.warning("alpaca mirror order %s unfilled; cancelled, sim fill used",
-                       alpaca_id)
+        httpx.delete(f"{base}/v2/orders/{alpaca_id}", headers=_alpaca_headers(), timeout=15)
+        logger.warning("alpaca mirror order %s unfilled; cancelled, sim fill used", alpaca_id)
         return None
     except Exception as exc:
         logger.warning("alpaca mirror failed: %s", type(exc).__name__)
@@ -306,22 +340,27 @@ def _cancel_standing_stop(db: Session, position_id) -> bool | None:
     from midas.config import settings
     from midas.models import StandingStop
 
-    row = db.scalar(_select(StandingStop).where(
-        StandingStop.position_id == position_id, StandingStop.active))
+    row = db.scalar(
+        _select(StandingStop).where(StandingStop.position_id == position_id, StandingStop.active)
+    )
     if row is None:
         return False
     confirmed = False
     try:
         r = httpx.delete(
             f"{settings.alpaca_paper_base_url}/v2/orders/{row.alpaca_order_id}",
-            headers=_alpaca_headers(), timeout=15)
+            headers=_alpaca_headers(),
+            timeout=15,
+        )
         if r.status_code in (200, 204, 404):
             confirmed = True  # cancelled, or unknown to the broker
         else:
             # 422 etc: order not cancelable - check whether it is terminal
             o = httpx.get(
                 f"{settings.alpaca_paper_base_url}/v2/orders/{row.alpaca_order_id}",
-                headers=_alpaca_headers(), timeout=15).json()
+                headers=_alpaca_headers(),
+                timeout=15,
+            ).json()
             if o.get("status") in ("canceled", "expired", "rejected", "filled"):
                 confirmed = True  # already dead (a fill is booked by sync)
     except Exception as exc:
@@ -347,26 +386,36 @@ def _restore_standing_stop(db: Session, position_id) -> None:
     if position is None or position.status != PositionStatus.open:
         return
     stop = effective_stop(db, position)
-    row = db.scalar(_select(StandingStop).where(
-        StandingStop.position_id == position_id))
+    row = db.scalar(_select(StandingStop).where(StandingStop.position_id == position_id))
     ok = False
     if stop and stop > 0:
         cid = f"ssr-{position_id.hex[:16]}-{int(utcnow().timestamp())}"
         try:
             r = httpx.post(
                 f"{settings.alpaca_paper_base_url}/v2/orders",
-                json={"symbol": position.symbol, "qty": str(int(position.qty)),
-                      "side": "sell", "type": "stop",
-                      "stop_price": str(round(stop, 2)),
-                      "time_in_force": "gtc", "client_order_id": cid},
-                headers=_alpaca_headers(), timeout=15)
+                json={
+                    "symbol": position.symbol,
+                    "qty": str(int(position.qty)),
+                    "side": "sell",
+                    "type": "stop",
+                    "stop_price": str(round(stop, 2)),
+                    "time_in_force": "gtc",
+                    "client_order_id": cid,
+                },
+                headers=_alpaca_headers(),
+                timeout=15,
+            )
             if r.status_code in (200, 201):
                 oid = r.json()["id"]
                 if row is None:
-                    db.add(StandingStop(position_id=position_id,
-                                        alpaca_order_id=oid,
-                                        stop_price=round(stop, 2),
-                                        qty=position.qty))
+                    db.add(
+                        StandingStop(
+                            position_id=position_id,
+                            alpaca_order_id=oid,
+                            stop_price=round(stop, 2),
+                            qty=position.qty,
+                        )
+                    )
                 else:
                     row.alpaca_order_id, row.stop_price = oid, round(stop, 2)
                     row.qty, row.active = position.qty, True
@@ -374,41 +423,52 @@ def _restore_standing_stop(db: Session, position_id) -> None:
         except Exception as exc:
             logger.warning("standing stop restore failed: %s", type(exc).__name__)
     record_event(
-        db, event_type="stop.restored" if ok else "ops.alert",
-        summary=(f"{position.symbol}: standing stop re-placed after failed exit"
-                 if ok else
-                 f"{position.symbol}: OPEN POSITION WITHOUT STANDING STOP - "
-                 f"exit failed and stop restore also failed; intervene"),
-        actor_type=ActorType.system, subject_type="position",
+        db,
+        event_type="stop.restored" if ok else "ops.alert",
+        summary=(
+            f"{position.symbol}: standing stop re-placed after failed exit"
+            if ok
+            else f"{position.symbol}: OPEN POSITION WITHOUT STANDING STOP - "
+            f"exit failed and stop restore also failed; intervene"
+        ),
+        actor_type=ActorType.system,
+        subject_type="position",
         subject_id=position_id,
     )
     db.flush()
 
 
-def _close_from_standing_stop(db: Session, position: Position, price: float,
-                              row) -> None:
+def _close_from_standing_stop(db: Session, position: Position, price: float, row) -> None:
     """Alpaca's resting stop filled while we weren't looking: book the
     exit into the ledger at Alpaca's fill price. No new order is sent."""
     thesis = db.get(TradeThesis, position.thesis_id)
     order = Order(
-        thesis_id=position.thesis_id, position_id=position.id,
-        side=OrderSide.sell, instrument=position.instrument,
-        symbol=position.symbol, qty=position.qty, reason=OrderReason.exit,
-        approved_by="standing_stop(alpaca)", status=OrderStatus.filled,
-        filled_price=price, broker=Broker.alpaca_paper,
+        thesis_id=position.thesis_id,
+        position_id=position.id,
+        side=OrderSide.sell,
+        instrument=position.instrument,
+        symbol=position.symbol,
+        qty=position.qty,
+        reason=OrderReason.exit,
+        approved_by="standing_stop(alpaca)",
+        status=OrderStatus.filled,
+        filled_price=price,
+        broker=Broker.alpaca_paper,
     )
     order.filled_at = utcnow()
     db.add(order)
     db.flush()
     account = get_account(db)
-    set_account(db, cash=account["cash"] + price * position.qty,
-                equity=account["equity"])
+    set_account(db, cash=account["cash"] + price * position.qty, equity=account["equity"])
     row.active = False
     record_event(
-        db, event_type="stop.standing_filled",
+        db,
+        event_type="stop.standing_filled",
         summary=f"{position.symbol}: Alpaca standing stop filled @ {price}",
-        actor_type=ActorType.system, subject_type="position",
-        subject_id=position.id, payload={"price": price, "qty": position.qty},
+        actor_type=ActorType.system,
+        subject_type="position",
+        subject_id=position.id,
+        payload={"price": price, "qty": position.qty},
     )
     apply_fill_to_position(db, order, thesis)
 
@@ -423,14 +483,23 @@ def sync_standing_stops(db: Session) -> dict:
     from midas.config import settings
     from midas.models import StandingStop
 
-    if not (settings.alpaca_api_key and settings.alpaca_api_secret and
-            settings.alpaca_mirror_orders and settings.alpaca_standing_stops):
+    if not (
+        settings.alpaca_api_key
+        and settings.alpaca_api_secret
+        and settings.alpaca_mirror_orders
+        and settings.alpaca_standing_stops
+    ):
         return {"enabled": False}
     base = settings.alpaca_paper_base_url
     summary = {"enabled": True, "placed": 0, "replaced": 0, "filled": 0}
-    open_shares = [p for p in db.scalars(_select(Position).where(
-        Position.status == PositionStatus.open,
-        Position.instrument == Instrument.shares))]
+    open_shares = [
+        p
+        for p in db.scalars(
+            _select(Position).where(
+                Position.status == PositionStatus.open, Position.instrument == Instrument.shares
+            )
+        )
+    ]
     rows = {r.position_id: r for r in db.scalars(_select(StandingStop))}
 
     summary["skipped_fractional"] = 0
@@ -446,16 +515,17 @@ def sync_standing_stops(db: Session) -> dict:
         row = rows.get(p.id)
         if row is not None and row.active:
             try:
-                o = httpx.get(f"{base}/v2/orders/{row.alpaca_order_id}",
-                              headers=_alpaca_headers(), timeout=15).json()
+                o = httpx.get(
+                    f"{base}/v2/orders/{row.alpaca_order_id}", headers=_alpaca_headers(), timeout=15
+                ).json()
             except Exception as exc:
-                logger.warning("standing stop check failed for %s: %s",
-                               p.symbol, type(exc).__name__)
+                logger.warning(
+                    "standing stop check failed for %s: %s", p.symbol, type(exc).__name__
+                )
                 continue
             status = o.get("status", "")
             if status == "filled":
-                _close_from_standing_stop(
-                    db, p, float(o.get("filled_avg_price") or stop), row)
+                _close_from_standing_stop(db, p, float(o.get("filled_avg_price") or stop), row)
                 summary["filled"] += 1
                 continue
             if status in ("canceled", "rejected", "expired"):
@@ -464,11 +534,13 @@ def sync_standing_stops(db: Session) -> dict:
                 continue  # resting and correct
             else:
                 try:
-                    httpx.delete(f"{base}/v2/orders/{row.alpaca_order_id}",
-                                 headers=_alpaca_headers(), timeout=15)
+                    httpx.delete(
+                        f"{base}/v2/orders/{row.alpaca_order_id}",
+                        headers=_alpaca_headers(),
+                        timeout=15,
+                    )
                 except Exception as exc:
-                    logger.warning("standing stop replace-cancel failed: %s",
-                                   type(exc).__name__)
+                    logger.warning("standing stop replace-cancel failed: %s", type(exc).__name__)
                     continue
                 row.active = False
                 summary["replaced"] += 1
@@ -476,46 +548,58 @@ def sync_standing_stops(db: Session) -> dict:
         # Alpaca rejects the duplicate and we ADOPT the original instead
         # of resting a second sell order.
         cid = f"ss-{p.id.hex[:20]}-{int(round(stop * 100))}-{int(p.qty)}"
-        payload = {"symbol": p.symbol, "qty": str(int(p.qty)), "side": "sell",
-                   "type": "stop", "stop_price": str(round(stop, 2)),
-                   "time_in_force": "gtc", "client_order_id": cid}
+        payload = {
+            "symbol": p.symbol,
+            "qty": str(int(p.qty)),
+            "side": "sell",
+            "type": "stop",
+            "stop_price": str(round(stop, 2)),
+            "time_in_force": "gtc",
+            "client_order_id": cid,
+        }
         try:
-            r = httpx.post(f"{base}/v2/orders", json=payload,
-                           headers=_alpaca_headers(), timeout=15)
+            r = httpx.post(f"{base}/v2/orders", json=payload, headers=_alpaca_headers(), timeout=15)
             if r.status_code == 422 and "client_order_id" in r.text:
                 r = httpx.get(
                     f"{base}/v2/orders:by_client_order_id",
                     params={"client_order_id": cid},
-                    headers=_alpaca_headers(), timeout=15)
+                    headers=_alpaca_headers(),
+                    timeout=15,
+                )
         except Exception as exc:
-            logger.warning("standing stop place failed for %s: %s",
-                           p.symbol, type(exc).__name__)
+            logger.warning("standing stop place failed for %s: %s", p.symbol, type(exc).__name__)
             continue
         if r.status_code not in (200, 201):
-            logger.warning("standing stop rejected for %s (%s): %s",
-                           p.symbol, r.status_code, r.text[:200])
+            logger.warning(
+                "standing stop rejected for %s (%s): %s", p.symbol, r.status_code, r.text[:200]
+            )
             continue
         oid = r.json()["id"]
         if row is None:
-            row = StandingStop(position_id=p.id, alpaca_order_id=oid,
-                               stop_price=round(stop, 2), qty=p.qty)
+            row = StandingStop(
+                position_id=p.id, alpaca_order_id=oid, stop_price=round(stop, 2), qty=p.qty
+            )
             db.add(row)
         else:
             row.alpaca_order_id, row.stop_price = oid, round(stop, 2)
             row.qty, row.active = p.qty, True
         summary["placed"] += 1
         record_event(
-            db, event_type="stop.standing_placed",
+            db,
+            event_type="stop.standing_placed",
             summary=f"{p.symbol}: GTC stop resting at Alpaca @ {round(stop, 2)}",
-            actor_type=ActorType.system, subject_type="position", subject_id=p.id,
+            actor_type=ActorType.system,
+            subject_type="position",
+            subject_id=p.id,
         )
     # positions closed internally: pull their orphaned resting stops
     open_ids = {p.id for p in open_shares}
     for pid, row in rows.items():
         if row.active and pid not in open_ids:
             try:
-                httpx.delete(f"{base}/v2/orders/{row.alpaca_order_id}",
-                             headers=_alpaca_headers(), timeout=15)
+                httpx.delete(
+                    f"{base}/v2/orders/{row.alpaca_order_id}", headers=_alpaca_headers(), timeout=15
+                )
             except Exception:
                 pass
             row.active = False
@@ -529,8 +613,12 @@ def _broker_fills_required(order: Order) -> bool:
     simulating. Simulated fills would contaminate the L2 evidence."""
     from midas.config import settings
 
-    if not (settings.require_broker_fills and settings.alpaca_mirror_orders
-            and settings.alpaca_api_key and settings.alpaca_api_secret):
+    if not (
+        settings.require_broker_fills
+        and settings.alpaca_mirror_orders
+        and settings.alpaca_api_key
+        and settings.alpaca_api_secret
+    ):
         return False
     if order.instrument == Instrument.shares:
         return True
@@ -562,12 +650,16 @@ def submit(db: Session, order: Order) -> Order:
         (order.side == OrderSide.buy and price > order.limit_price)
         or (order.side == OrderSide.sell and price < order.limit_price)
     ):
-            order.status = OrderStatus.rejected
-            order.error = f"market {price} beyond limit {order.limit_price}"
-            record_event(db, event_type="order.rejected",
-                         summary=f"{order.symbol}: {order.error}",
-                         subject_type="order", subject_id=order.id)
-            return order
+        order.status = OrderStatus.rejected
+        order.error = f"market {price} beyond limit {order.limit_price}"
+        record_event(
+            db,
+            event_type="order.rejected",
+            summary=f"{order.symbol}: {order.error}",
+            subject_type="order",
+            subject_id=order.id,
+        )
+        return order
 
     multiplier = 100 if order.instrument == Instrument.option else 1
     notional = price * order.qty * multiplier
@@ -576,9 +668,13 @@ def submit(db: Session, order: Order) -> Order:
     if order.side == OrderSide.buy and notional + fee > account["cash"]:
         order.status = OrderStatus.rejected
         order.error = f"insufficient paper cash ({account['cash']:.2f} < {notional:.2f})"
-        record_event(db, event_type="order.rejected",
-                     summary=f"{order.symbol}: {order.error}",
-                     subject_type="order", subject_id=order.id)
+        record_event(
+            db,
+            event_type="order.rejected",
+            summary=f"{order.symbol}: {order.error}",
+            subject_type="order",
+            subject_id=order.id,
+        )
         return order
 
     # Mirror equities to the real Alpaca paper account when configured -
@@ -587,18 +683,23 @@ def submit(db: Session, order: Order) -> Order:
     fill_source = "sim"
     alpaca_id = None
     cancelled_stop: bool | None = False
-    if (order.side == OrderSide.sell and order.instrument == Instrument.shares
-            and order.position_id):
+    if order.side == OrderSide.sell and order.instrument == Instrument.shares and order.position_id:
         cancelled_stop = _cancel_standing_stop(db, order.position_id)
         if cancelled_stop is None:  # noqa: SIM102
             # the resting stop may still be live: selling now could fill
             # BOTH orders and go short - abort, keep the stop, alert
             order.status = OrderStatus.rejected
-            order.error = ("standing-stop cancellation unconfirmed; exit "
-                           "aborted to avoid a double-sell; will retry")
-            record_event(db, event_type="ops.alert",
-                         summary=f"{order.symbol}: {order.error}",
-                         subject_type="order", subject_id=order.id)
+            order.error = (
+                "standing-stop cancellation unconfirmed; exit "
+                "aborted to avoid a double-sell; will retry"
+            )
+            record_event(
+                db,
+                event_type="ops.alert",
+                summary=f"{order.symbol}: {order.error}",
+                subject_type="order",
+                subject_id=order.id,
+            )
             return order
     if order.instrument == Instrument.option:
         mirrored = _mirror_option_to_alpaca(order, option_mid)
@@ -615,12 +716,18 @@ def submit(db: Session, order: Order) -> Order:
         fill_source = "alpaca_paper"
     elif _broker_fills_required(order):
         order.status = OrderStatus.rejected
-        order.error = ("broker fill unavailable (fail-closed: simulated fills "
-                       "must not contaminate the broker-backed record); "
-                       "will retry next pass")
-        record_event(db, event_type="order.rejected",
-                     summary=f"{order.symbol}: {order.error}",
-                     subject_type="order", subject_id=order.id)
+        order.error = (
+            "broker fill unavailable (fail-closed: simulated fills "
+            "must not contaminate the broker-backed record); "
+            "will retry next pass"
+        )
+        record_event(
+            db,
+            event_type="order.rejected",
+            summary=f"{order.symbol}: {order.error}",
+            subject_type="order",
+            subject_id=order.id,
+        )
         if cancelled_stop:
             _restore_standing_stop(db, order.position_id)
         return order
@@ -631,12 +738,20 @@ def submit(db: Session, order: Order) -> Order:
     cash = account["cash"] + (-notional if order.side == OrderSide.buy else notional) - fee
     set_account(db, cash=cash, equity=account["equity"])  # equity refreshed by marks
     record_event(
-        db, event_type="order.filled",
+        db,
+        event_type="order.filled",
         summary=f"{order.side.value} {order.qty:g} {order.symbol} @ {price} "
-                f"({fill_source}" + (f", fees ${fee:.2f}" if fee else "") + ")",
-        actor_type=ActorType.system, subject_type="order", subject_id=order.id,
-        payload={"price": price, "notional": round(notional, 2), "fees_usd": fee,
-                 "fill_source": fill_source, "alpaca_order_id": alpaca_id},
+        f"({fill_source}" + (f", fees ${fee:.2f}" if fee else "") + ")",
+        actor_type=ActorType.system,
+        subject_type="order",
+        subject_id=order.id,
+        payload={
+            "price": price,
+            "notional": round(notional, 2),
+            "fees_usd": fee,
+            "fill_source": fill_source,
+            "alpaca_order_id": alpaca_id,
+        },
     )
     return order
 
@@ -650,21 +765,30 @@ def apply_fill_to_position(db: Session, order: Order, thesis, sector: str = "") 
     if order.side == OrderSide.buy:
         if position is None:
             position = Position(
-                thesis_id=order.thesis_id, ticker=thesis.ticker, symbol=order.symbol,
-                instrument=order.instrument, sector=sector, qty=order.qty,
+                thesis_id=order.thesis_id,
+                ticker=thesis.ticker,
+                symbol=order.symbol,
+                instrument=order.instrument,
+                sector=sector,
+                qty=order.qty,
                 avg_price=order.filled_price + fee / (order.qty * multiplier_f),
                 stop_price=thesis.stop_price,
-                option_detail=(_parse_option_symbol(order.symbol)[1]
-                               if order.instrument == Instrument.option else {}),
+                option_detail=(
+                    _parse_option_symbol(order.symbol)[1]
+                    if order.instrument == Instrument.option
+                    else {}
+                ),
                 opened_at=order.filled_at,
             )
             db.add(position)
             db.flush()
         else:
             total = position.qty + order.qty
-            position.avg_price = (position.avg_price * position.qty
-                                  + order.filled_price * order.qty
-                                  + fee / multiplier_f) / total
+            position.avg_price = (
+                position.avg_price * position.qty
+                + order.filled_price * order.qty
+                + fee / multiplier_f
+            ) / total
             position.qty = total
         order.position_id = position.id
         return position
@@ -681,9 +805,11 @@ def apply_fill_to_position(db: Session, order: Order, thesis, sector: str = "") 
         position.status = PositionStatus.closed
         position.closed_at = order.filled_at
     record_event(
-        db, event_type="position.reduced" if position.qty > 0 else "position.closed",
+        db,
+        event_type="position.reduced" if position.qty > 0 else "position.closed",
         summary=f"{position.symbol}: realized {pnl:+.2f} USD (paper)",
-        subject_type="position", subject_id=position.id,
+        subject_type="position",
+        subject_id=position.id,
         payload={"pnl_usd": round(pnl, 2), "remaining_qty": position.qty},
     )
     return position
@@ -699,12 +825,12 @@ def fetch_alpaca_account() -> dict | None:
     if not (settings.alpaca_api_key and settings.alpaca_api_secret):
         return None
     try:
-        r = httpx.get(f"{settings.alpaca_paper_base_url}/v2/account",
-                      headers=_alpaca_headers(), timeout=15)
+        r = httpx.get(
+            f"{settings.alpaca_paper_base_url}/v2/account", headers=_alpaca_headers(), timeout=15
+        )
         if r.status_code == 200:
             a = r.json()
-            return {"equity": float(a.get("equity") or 0),
-                    "cash": float(a.get("cash") or 0)}
+            return {"equity": float(a.get("equity") or 0), "cash": float(a.get("cash") or 0)}
     except Exception as exc:
         logger.warning("alpaca account fetch failed: %s", type(exc).__name__)
     return None
@@ -715,15 +841,17 @@ def fetch_alpaca_closed_orders() -> list[dict]:
 
     from midas.config import settings
 
-    r = httpx.get(f"{settings.alpaca_paper_base_url}/v2/orders",
-                  params={"status": "closed", "limit": 500, "direction": "desc"},
-                  headers=_alpaca_headers(), timeout=15)
+    r = httpx.get(
+        f"{settings.alpaca_paper_base_url}/v2/orders",
+        params={"status": "closed", "limit": 500, "direction": "desc"},
+        headers=_alpaca_headers(),
+        timeout=15,
+    )
     r.raise_for_status()
     return r.json()
 
 
-def reconcile_mirrored_orders(db: Session,
-                              alpaca_orders: list[dict] | None = None) -> dict:
+def reconcile_mirrored_orders(db: Session, alpaca_orders: list[dict] | None = None) -> dict:
     """Execution integrity: every ledger fill that claims an Alpaca mirror
     must match Alpaca's own record (qty exact, price within a cent).
     Decisions are scored by the market; execution is scored by the broker.
@@ -733,9 +861,9 @@ def reconcile_mirrored_orders(db: Session,
 
     from midas.models import Broker
 
-    ours = db.scalars(select(Order).where(
-        Order.broker == Broker.alpaca_paper,
-        Order.status == OrderStatus.filled)).all()
+    ours = db.scalars(
+        select(Order).where(Order.broker == Broker.alpaca_paper, Order.status == OrderStatus.filled)
+    ).all()
     if not ours:
         return {"checked": 0, "matched": 0, "mismatched": 0, "unverifiable": 0}
     if alpaca_orders is None:
@@ -743,8 +871,13 @@ def reconcile_mirrored_orders(db: Session,
             alpaca_orders = fetch_alpaca_closed_orders()
         except Exception as exc:
             logger.warning("reconcile: alpaca unreachable: %s", type(exc).__name__)
-            return {"checked": 0, "matched": 0, "mismatched": 0,
-                    "unverifiable": len(ours), "note": "alpaca unreachable"}
+            return {
+                "checked": 0,
+                "matched": 0,
+                "mismatched": 0,
+                "unverifiable": len(ours),
+                "note": "alpaca unreachable",
+            }
     theirs = {o.get("client_order_id"): o for o in alpaca_orders}
     matched = mismatched = unverifiable = 0
     for o in ours:
@@ -761,16 +894,28 @@ def reconcile_mirrored_orders(db: Session,
         else:
             mismatched += 1
             record_event(
-                db, event_type="execution.mismatch",
-                summary=(f"MIRROR MISMATCH {o.symbol}: ledger "
-                         f"{o.qty:g}@{o.filled_price} vs alpaca "
-                         f"{their_qty:g}@{their_price}"),
-                subject_type="order", subject_id=o.id,
-                payload={"ledger_qty": o.qty, "ledger_price": o.filled_price,
-                         "alpaca_qty": their_qty, "alpaca_price": their_price},
+                db,
+                event_type="execution.mismatch",
+                summary=(
+                    f"MIRROR MISMATCH {o.symbol}: ledger "
+                    f"{o.qty:g}@{o.filled_price} vs alpaca "
+                    f"{their_qty:g}@{their_price}"
+                ),
+                subject_type="order",
+                subject_id=o.id,
+                payload={
+                    "ledger_qty": o.qty,
+                    "ledger_price": o.filled_price,
+                    "alpaca_qty": their_qty,
+                    "alpaca_price": their_price,
+                },
             )
-    return {"checked": len(ours), "matched": matched,
-            "mismatched": mismatched, "unverifiable": unverifiable}
+    return {
+        "checked": len(ours),
+        "matched": matched,
+        "mismatched": mismatched,
+        "unverifiable": unverifiable,
+    }
 
 
 def refresh_equity(db: Session) -> float:
@@ -793,7 +938,13 @@ def refresh_equity(db: Session) -> float:
 
 
 def _pseudo_order(p: Position) -> Order:
-    o = Order(thesis_id=p.thesis_id, side=OrderSide.sell, instrument=p.instrument,
-              symbol=p.symbol, qty=p.qty, reason="exit")
+    o = Order(
+        thesis_id=p.thesis_id,
+        side=OrderSide.sell,
+        instrument=p.instrument,
+        symbol=p.symbol,
+        qty=p.qty,
+        reason="exit",
+    )
     o.position_id = p.id
     return o

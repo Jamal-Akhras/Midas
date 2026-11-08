@@ -1,5 +1,6 @@
 """Market data + options chains. Provider order: Alpaca (paper keys, free)
 -> yfinance (no key) -> demo fixtures. Source is always reported honestly."""
+
 import logging
 import re
 from typing import Any
@@ -36,10 +37,11 @@ def _finnhub_sector(ticker: str) -> str:
     sector = ""
     if settings.finnhub_api_key:
         try:
-            r = httpx.get("https://finnhub.io/api/v1/stock/profile2",
-                          params={"symbol": ticker,
-                                  "token": settings.finnhub_api_key},
-                          timeout=10)
+            r = httpx.get(
+                "https://finnhub.io/api/v1/stock/profile2",
+                params={"symbol": ticker, "token": settings.finnhub_api_key},
+                timeout=10,
+            )
             if r.status_code == 200:
                 sector = r.json().get("finnhubIndustry") or ""
         except Exception:
@@ -51,6 +53,7 @@ def _finnhub_sector(ticker: str) -> str:
 def _yf():
     try:
         import yfinance
+
         return yfinance
     except ImportError:
         return None
@@ -62,28 +65,37 @@ def get_quote(ticker: str) -> ToolResult:
     if settings.effective_demo_mode:
         q = demo_data.QUOTES.get(ticker)
         if q is None:
-            raise ToolError(f"no demo quote for {ticker} (demo universe: {demo_data.DEMO_UNIVERSE})")
+            raise ToolError(
+                f"no demo quote for {ticker} (demo universe: {demo_data.DEMO_UNIVERSE})"
+            )
         return ToolResult(data={"ticker": ticker, **q}, source="demo")
     if _alpaca_enabled():
         try:
             r = httpx.get(
                 f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/trades/latest",
-                headers=_alpaca_headers(), timeout=15,
+                headers=_alpaca_headers(),
+                timeout=15,
             )
             r.raise_for_status()
             price = r.json()["trade"]["p"]
             bars = _alpaca_bars(ticker, days=30)
             if bars:  # empty bars => zeros would poison the floor check;
-                      # fall through to yfinance instead of lying
+                # fall through to yfinance instead of lying
                 avg_vol = sum(b["volume"] for b in bars) / len(bars)
                 prev_close = bars[-1]["close"]
-                if bars[-1]["date"] == __import__("datetime").date.today().isoformat() \
-                        and len(bars) > 1:
+                if (
+                    bars[-1]["date"] == __import__("datetime").date.today().isoformat()
+                    and len(bars) > 1
+                ):
                     prev_close = bars[-2]["close"]
                 return ToolResult(
-                    data={"ticker": ticker, "price": price, "prev_close": prev_close,
-                          "avg_volume": avg_vol,
-                          "sector": _finnhub_sector(ticker)},
+                    data={
+                        "ticker": ticker,
+                        "price": price,
+                        "prev_close": prev_close,
+                        "avg_volume": avg_vol,
+                        "sector": _finnhub_sector(ticker),
+                    },
                     source="alpaca",
                 )
             logger.warning("alpaca returned no bars for %s; trying yfinance", ticker)
@@ -94,10 +106,13 @@ def get_quote(ticker: str) -> ToolResult:
         try:
             info = yf.Ticker(ticker).fast_info
             return ToolResult(
-                data={"ticker": ticker, "price": float(info["lastPrice"]),
-                      "prev_close": float(info["previousClose"]),
-                      "avg_volume": float(info.get("threeMonthAverageVolume") or 0),
-                      "sector": ""},
+                data={
+                    "ticker": ticker,
+                    "price": float(info["lastPrice"]),
+                    "prev_close": float(info["previousClose"]),
+                    "avg_volume": float(info.get("threeMonthAverageVolume") or 0),
+                    "sector": "",
+                },
                 source="yfinance",
             )
         except Exception as exc:  # yfinance raises many types
@@ -118,16 +133,28 @@ def _alpaca_bars(ticker: str, days: int) -> list[dict]:
     for feed in ("sip", "iex"):
         r = httpx.get(
             f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/bars",
-            params={"timeframe": "1Day", "limit": days, "adjustment": "split",
-                    "start": start, "feed": feed},
-            headers=_alpaca_headers(), timeout=15,
+            params={
+                "timeframe": "1Day",
+                "limit": days,
+                "adjustment": "split",
+                "start": start,
+                "feed": feed,
+            },
+            headers=_alpaca_headers(),
+            timeout=15,
         )
         if r.status_code in (401, 403) and feed == "sip":
             continue
         r.raise_for_status()
         return [
-            {"date": b["t"][:10], "open": b["o"], "high": b["h"], "low": b["l"],
-             "close": b["c"], "volume": b["v"]}
+            {
+                "date": b["t"][:10],
+                "open": b["o"],
+                "high": b["h"],
+                "low": b["l"],
+                "close": b["c"],
+                "volume": b["v"],
+            }
             for b in r.json().get("bars") or []
         ]
     return []
@@ -149,9 +176,14 @@ def get_daily_bars(ticker: str, days: int = 60) -> ToolResult:
         try:
             hist = yf.Ticker(ticker).history(period=f"{days}d")
             bars = [
-                {"date": str(idx.date()), "open": round(float(row["Open"]), 4),
-                 "high": round(float(row["High"]), 4), "low": round(float(row["Low"]), 4),
-                 "close": round(float(row["Close"]), 4), "volume": int(row["Volume"])}
+                {
+                    "date": str(idx.date()),
+                    "open": round(float(row["Open"]), 4),
+                    "high": round(float(row["High"]), 4),
+                    "low": round(float(row["Low"]), 4),
+                    "close": round(float(row["Close"]), 4),
+                    "volume": int(row["Volume"]),
+                }
                 for idx, row in hist.iterrows()
             ]
             return ToolResult(data=bars, source="yfinance")
@@ -199,15 +231,21 @@ def _chain_from_snapshots(snapshots: dict, spot: float) -> list[dict]:
             continue
         if dte < 0 or dte > 120:
             continue
-        chain.append({
-            "expiry": meta["expiry"], "dte": dte, "type": meta["type"],
-            "strike": meta["strike"], "bid": bid, "ask": ask,
-            "mid": round((bid + ask) / 2, 4),
-            "open_interest": int(_num(s.get("openInterest") or s.get("open_interest"))),
-            "volume": int(_num((s.get("dailyBar") or {}).get("v"))),
-            "iv": round(_num(s.get("impliedVolatility")), 4),
-            "delta": (round(_num(greeks.get("delta")), 4) if greeks else None),
-        })
+        chain.append(
+            {
+                "expiry": meta["expiry"],
+                "dte": dte,
+                "type": meta["type"],
+                "strike": meta["strike"],
+                "bid": bid,
+                "ask": ask,
+                "mid": round((bid + ask) / 2, 4),
+                "open_interest": int(_num(s.get("openInterest") or s.get("open_interest"))),
+                "volume": int(_num((s.get("dailyBar") or {}).get("v"))),
+                "iv": round(_num(s.get("impliedVolatility")), 4),
+                "delta": (round(_num(greeks.get("delta")), 4) if greeks else None),
+            }
+        )
     return chain
 
 
@@ -219,7 +257,9 @@ def _alpaca_option_chain(ticker: str) -> list[dict]:
     for _ in range(4):  # a few pages is plenty inside the +-15% band
         r = httpx.get(
             f"{settings.alpaca_data_base_url}/v1beta1/options/snapshots/{ticker}",
-            params=params, headers=_alpaca_headers(), timeout=20,
+            params=params,
+            headers=_alpaca_headers(),
+            timeout=20,
         )
         r.raise_for_status()
         body = r.json()
@@ -278,15 +318,21 @@ def get_options_chain(ticker: str) -> ToolResult:
                             continue  # keep chains tractable
                         bid = _num(row.get("bid"))
                         ask = _num(row.get("ask"))
-                        chain.append({
-                            "expiry": expiry, "dte": dte, "type": opt_type,
-                            "strike": strike, "bid": bid, "ask": ask,
-                            "mid": round((bid + ask) / 2, 4),
-                            "open_interest": int(_num(row.get("openInterest"))),
-                            "volume": int(_num(row.get("volume"))),
-                            "iv": round(_num(row.get("impliedVolatility")), 4),
-                            "delta": None,  # yfinance has no greeks
-                        })
+                        chain.append(
+                            {
+                                "expiry": expiry,
+                                "dte": dte,
+                                "type": opt_type,
+                                "strike": strike,
+                                "bid": bid,
+                                "ask": ask,
+                                "mid": round((bid + ask) / 2, 4),
+                                "open_interest": int(_num(row.get("openInterest"))),
+                                "volume": int(_num(row.get("volume"))),
+                                "iv": round(_num(row.get("impliedVolatility")), 4),
+                                "delta": None,  # yfinance has no greeks
+                            }
+                        )
             return ToolResult(data=chain, source="yfinance")
         except Exception as exc:
             logger.warning("yfinance chain failed for %s: %s", ticker, type(exc).__name__)

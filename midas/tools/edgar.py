@@ -1,5 +1,6 @@
 """SEC EDGAR: filings and insider transactions. Free, no key required.
 SEC asks for a descriptive User-Agent on all requests."""
+
 import logging
 
 import httpx
@@ -24,8 +25,7 @@ FORM_SUMMARY_HINT = {
 
 def _cik_for(ticker: str) -> str:
     if not _cik_cache:
-        r = httpx.get("https://www.sec.gov/files/company_tickers.json",
-                      headers=UA, timeout=30)
+        r = httpx.get("https://www.sec.gov/files/company_tickers.json", headers=UA, timeout=30)
         r.raise_for_status()
         for row in r.json().values():
             _cik_cache[row["ticker"].upper()] = str(row["cik_str"]).zfill(10)
@@ -43,23 +43,28 @@ def get_filings(ticker: str, forms: str = "10-K,10-Q,8-K,DEF 14A", limit: int = 
     wanted = {f.strip().upper() for f in forms.split(",") if f.strip()}
     try:
         cik = _cik_for(ticker)
-        r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
-                      headers=UA, timeout=30)
+        r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=UA, timeout=30)
         r.raise_for_status()
         recent = r.json()["filings"]["recent"]
         out = []
         for form, filed, accession, doc in zip(
-            recent["form"], recent["filingDate"],
-            recent["accessionNumber"], recent["primaryDocument"], strict=True,
+            recent["form"],
+            recent["filingDate"],
+            recent["accessionNumber"],
+            recent["primaryDocument"],
+            strict=True,
         ):
             if wanted and form.upper() not in wanted:
                 continue
             acc = accession.replace("-", "")
-            out.append({
-                "form": form, "filed": filed,
-                "url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}",
-                "summary": FORM_SUMMARY_HINT.get(form.upper(), ""),
-            })
+            out.append(
+                {
+                    "form": form,
+                    "filed": filed,
+                    "url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}",
+                    "summary": FORM_SUMMARY_HINT.get(form.upper(), ""),
+                }
+            )
             if len(out) >= limit:
                 break
         return ToolResult(data=out, source="edgar")
@@ -74,23 +79,28 @@ def get_insider_transactions(ticker: str, limit: int = 10) -> ToolResult:
         return ToolResult(data=demo_data.INSIDER_TRANSACTIONS["default"], source="demo")
     try:
         cik = _cik_for(ticker)
-        r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json",
-                      headers=UA, timeout=30)
+        r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=UA, timeout=30)
         r.raise_for_status()
         recent = r.json()["filings"]["recent"]
         out = []
         for form, filed, accession, doc in zip(
-            recent["form"], recent["filingDate"],
-            recent["accessionNumber"], recent["primaryDocument"], strict=True,
+            recent["form"],
+            recent["filingDate"],
+            recent["accessionNumber"],
+            recent["primaryDocument"],
+            strict=True,
         ):
             if form != "4":
                 continue
             acc = accession.replace("-", "")
-            out.append({
-                "form": "4", "filed": filed,
-                "url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}",
-                "note": "Form 4 insider transaction; open URL for direction/size",
-            })
+            out.append(
+                {
+                    "form": "4",
+                    "filed": filed,
+                    "url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{acc}/{doc}",
+                    "note": "Form 4 insider transaction; open URL for direction/size",
+                }
+            )
             if len(out) >= limit:
                 break
         return ToolResult(data=out, source="edgar")
