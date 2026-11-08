@@ -10,8 +10,16 @@ from sqlalchemy.orm import Session
 from midas.audit import record_event
 from midas.config import L3_BAR, settings
 from midas.models import (
-    ArtifactType, Direction, Instrument, Position, PositionStatus,
-    ResearchArtifact, TradeOutcome, TradeThesis, aware, utcnow,
+    ArtifactType,
+    Direction,
+    Instrument,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    TradeOutcome,
+    TradeThesis,
+    aware,
+    utcnow,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,6 +35,7 @@ def score_closed_positions(db: Session) -> list[TradeOutcome]:
         if p.id in have:
             continue
         thesis = db.get(TradeThesis, p.thesis_id)
+        assert thesis is not None, f"closed position {p.id} has no thesis"
         outcome = _score(db, p, thesis)
         db.add(outcome)
         db.flush()
@@ -48,7 +57,8 @@ def _score(db: Session, p: Position, thesis: TradeThesis) -> TradeOutcome:
     pnl = p.realized_pnl_usd
     invested = cost_basis * _initial_qty(db, p)
     pnl_pct = (pnl / invested * 100) if invested else 0.0
-    holding_days = max((aware(p.closed_at) - aware(p.opened_at)).days, 0)
+    closed_at = p.closed_at or utcnow()  # scored positions are closed; defensive
+    holding_days = max((aware(closed_at) - aware(p.opened_at)).days, 0)
 
     exit_kind = "manual"
     last_mark = p.last_mark_price or p.avg_price
@@ -115,7 +125,7 @@ def stats(db: Session) -> dict:
     # and no simulated fill anywhere in the lifecycle
     from datetime import datetime as _dt
 
-    from midas.models import OrderSide, OrderStatus, SystemState
+    from midas.models import OrderSide, OrderStatus
 
     l2row = db.get(SystemState, "l2_since")
     l2_start = (aware(_dt.fromisoformat(l2row.value["at"]))
@@ -185,8 +195,10 @@ def stats(db: Session) -> dict:
         ScreenCandidate.fwd_10d_pct.isnot(None))).all()
     traded_tickers = {t.ticker for t in db.scalars(select(TradeThesis).where(
         TradeThesis.status.in_((ThesisStatus.executed,))))}
-    traded_fwd = [c.fwd_10d_pct for c in cands if c.ticker in traded_tickers]
-    skipped_fwd = [c.fwd_10d_pct for c in cands if c.ticker not in traded_tickers]
+    traded_fwd = [c.fwd_10d_pct for c in cands
+                  if c.fwd_10d_pct is not None and c.ticker in traded_tickers]
+    skipped_fwd = [c.fwd_10d_pct for c in cands
+                   if c.fwd_10d_pct is not None and c.ticker not in traded_tickers]
     counterfactual = {
         "note": "fwd returns ~10 sessions after screen; the committee must "
                 "beat the candidates it rejected",

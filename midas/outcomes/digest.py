@@ -9,9 +9,20 @@ from sqlalchemy.orm import Session
 from midas.config import settings
 from midas.execution.paper_broker import get_account
 from midas.models import (
-    ApprovalRequest, ApprovalStatus, AuditEvent, CostEvent, Instrument, Order,
-    OrderStatus, Position, PositionStatus, ReviewCheckpoint, TradeOutcome,
-    TradeThesis, aware, utcnow,
+    ApprovalRequest,
+    ApprovalStatus,
+    AuditEvent,
+    CostEvent,
+    Instrument,
+    Order,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    ReviewCheckpoint,
+    TradeOutcome,
+    TradeThesis,
+    aware,
+    utcnow,
 )
 from midas.outcomes.scoring import stats
 

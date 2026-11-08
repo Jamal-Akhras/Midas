@@ -11,8 +11,9 @@ timer, or `midas monitor --loop`. It:
 5. scores newly closed positions.
 """
 import logging
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,9 +23,22 @@ from midas.audit import record_event
 from midas.config import settings
 from midas.execution import executor, paper_broker
 from midas.models import (
-    ActorType, CheckpointStatus, CheckpointTrigger, Direction, Instrument,
-    OrderStatus, PipelineRun, Position, PositionStatus, ResearchArtifact,
-    ReviewCheckpoint, RunKind, RunStatus, ThesisStatus, TradeThesis, aware,
+    ActorType,
+    CheckpointStatus,
+    CheckpointTrigger,
+    Direction,
+    Instrument,
+    OrderStatus,
+    PipelineRun,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    ReviewCheckpoint,
+    RunKind,
+    RunStatus,
+    ThesisStatus,
+    TradeThesis,
+    aware,
     utcnow,
 )
 from midas.outcomes.scoring import score_closed_positions
@@ -194,7 +208,9 @@ def reevaluate_position(
     through the autonomy ladder. Returns the decision."""
     with session_factory() as db:
         position = db.get(Position, position_id)
+        assert position is not None, f"review of unknown position {position_id}"
         thesis = db.get(TradeThesis, position.thesis_id)
+        assert thesis is not None, f"position {position_id} has no thesis"
         run = PipelineRun(kind=RunKind.reevaluation, ticker=position.ticker,
                           position_id=position.id)
         db.add(run)
@@ -427,7 +443,7 @@ def run_post_mortems(session_factory: Callable[[], Session],
                      router: ModelRouter, outcome_ids: list) -> list[str]:
     """One cheap LLM call per closed position: what should future
     committees learn? Lessons feed the investor's context."""
-    from midas.models import ArtifactType, TradeOutcome
+    from midas.models import TradeOutcome
 
     lessons = []
     for oid in outcome_ids:
@@ -442,6 +458,8 @@ def run_post_mortems(session_factory: Callable[[], Session],
                 continue  # once per position, ever
             position = db.get(Position, outcome.position_id)
             thesis = db.get(TradeThesis, outcome.thesis_id)
+            if position is None or thesis is None:
+                continue  # orphaned outcome: nothing to learn from
             run = PipelineRun(kind=RunKind.post_mortem, ticker=position.ticker,
                               position_id=position.id)
             db.add(run)
@@ -789,7 +807,7 @@ def maybe_portfolio_review(session_factory: Callable[[], Session],
         book = []
         for p in positions:
             thesis = db.get(TradeThesis, p.thesis_id)
-            entry = {
+            entry: dict[str, Any] = {
                 "ticker": p.ticker, "symbol": p.symbol,
                 "instrument": p.instrument.value, "qty": p.qty,
                 "avg_price": p.avg_price, "mark": p.last_mark_price,
@@ -799,7 +817,7 @@ def maybe_portfolio_review(session_factory: Callable[[], Session],
                 "targets": thesis.targets if thesis else [],
                 "invalidators": thesis.invalidators if thesis else [],
             }
-            fresh = {}
+            fresh: dict[str, dict] = {}
             for at in (ArtifactType.verdict, ArtifactType.bull_case,
                        ArtifactType.bear_case):
                 art = latest_artifact_for_ticker(db, p.ticker, at)
@@ -985,7 +1003,7 @@ def _run_monitor_pass(session_factory: Callable[[], Session],
     from midas.config import reload_settings
 
     reload_settings()  # Settings-tab changes apply within one pass
-    summary = {"swept": 0, "executed": 0, "reviewed": [], "scored": 0,
+    summary: dict[str, Any] = {"swept": 0, "executed": 0, "reviewed": [], "scored": 0,
                "halted": None, "auto_cycle": None}
     with session_factory() as db:
         summary["swept"] = sweep_stale_runs(db)

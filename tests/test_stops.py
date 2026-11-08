@@ -4,7 +4,11 @@ from datetime import timedelta
 from midas.config import settings
 from midas.execution import paper_broker
 from midas.models import (
-    ApprovalRequest, Instrument, Position, TradeThesis, utcnow,
+    ApprovalRequest,
+    Instrument,
+    Position,
+    TradeThesis,
+    utcnow,
 )
 from midas.models.domain import Direction, PipelineRun, ResearchArtifact, RunKind, ThesisStatus
 from midas.scheduler import monitor
@@ -73,7 +77,7 @@ def test_ratchet_is_monotonic_and_below_market(db, monkeypatch):
 
 def test_time_stop_proposes_exit_once(db, monkeypatch):
     monkeypatch.setattr(settings, "autonomy_level", 0)  # proposals, not orders
-    p = _position(db, opened_days_ago=30, mark=101.0)
+    _position(db, opened_days_ago=30, mark=101.0)
     out = monitor.apply_time_stops(db)
     assert out == ["ACME"]
     reqs = db.query(ApprovalRequest).all()
@@ -114,7 +118,8 @@ def test_stop_breach_exit_is_deterministic(factory, monkeypatch):
 
 
 def test_fail_closed_when_broker_unavailable(db, monkeypatch):
-    from midas.models import Instrument as I, Order, OrderReason, OrderSide, OrderStatus
+    from midas.models import Instrument as I
+    from midas.models import Order, OrderReason, OrderSide, OrderStatus
 
     monkeypatch.setattr(settings, "alpaca_mirror_orders", True)
     monkeypatch.setattr(settings, "require_broker_fills", True)
@@ -136,7 +141,8 @@ def test_fail_closed_when_broker_unavailable(db, monkeypatch):
 
 
 def test_option_fills_carry_friction(db, monkeypatch):
-    from midas.models import Instrument as I, Order, OrderReason, OrderSide, OrderStatus
+    from midas.models import Instrument as I
+    from midas.models import Order, OrderReason, OrderSide, OrderStatus
 
     monkeypatch.setattr(paper_broker, "mark_price", lambda db, o: 4.0)
     cash_before = paper_broker.get_account(db)["cash"]

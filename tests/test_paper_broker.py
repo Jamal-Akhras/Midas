@@ -5,9 +5,19 @@ from sqlalchemy import select
 from midas.config import settings
 from midas.execution import paper_broker as pb
 from midas.models import (
-    Direction, Instrument, Order, OrderReason, OrderSide, OrderStatus,
-    PipelineRun, Position, PositionStatus, ResearchArtifact, RunKind,
-    ThesisStatus, TradeThesis,
+    Direction,
+    Instrument,
+    Order,
+    OrderReason,
+    OrderSide,
+    OrderStatus,
+    PipelineRun,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    RunKind,
+    ThesisStatus,
+    TradeThesis,
 )
 
 

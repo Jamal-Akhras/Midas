@@ -5,11 +5,21 @@ import pytest
 from sqlalchemy import select
 
 from midas.config import settings
-from midas.execution import executor, paper_broker
+from midas.execution import executor
 from midas.models import (
-    ApprovalRequest, ApprovalStatus, ArtifactType, DataSnapshot, Order,
-    OrderStatus, Position, PositionStatus, ResearchArtifact, RunStatus,
-    ThesisStatus, TradeOutcome, TradeThesis,
+    ApprovalRequest,
+    ApprovalStatus,
+    ArtifactType,
+    DataSnapshot,
+    Order,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    RunStatus,
+    ThesisStatus,
+    TradeOutcome,
+    TradeThesis,
 )
 from midas.outcomes.scoring import score_closed_positions, stats
 from midas.pipeline.committee import run_committee

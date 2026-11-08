@@ -46,7 +46,6 @@ def init_db() -> None:
     Base.metadata.create_all(get_engine())
     # lightweight migration: columns added after first release
     if settings.database_url.startswith("sqlite"):
-        import sqlite3
 
         with get_engine().connect() as conn:
             for ddl in (

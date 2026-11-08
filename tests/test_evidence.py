@@ -2,10 +2,26 @@
 from midas.config import settings
 from midas.execution import paper_broker
 from midas.models import (
-    Broker, Instrument, Order, OrderReason, OrderSide, OrderStatus, Position,
-    PositionStatus, SystemState, TradeOutcome, utcnow,
+    Broker,
+    Instrument,
+    Order,
+    OrderReason,
+    OrderSide,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    SystemState,
+    TradeOutcome,
+    utcnow,
 )
-from midas.models.domain import Direction, PipelineRun, ResearchArtifact, RunKind, ThesisStatus, TradeThesis
+from midas.models.domain import (
+    Direction,
+    PipelineRun,
+    ResearchArtifact,
+    RunKind,
+    ThesisStatus,
+    TradeThesis,
+)
 from midas.outcomes.scoring import stats
 from midas.scheduler import monitor
 
@@ -21,20 +37,24 @@ def _start_l2(db):
 def _closed_position(db, ticker, pnl, brokers):
     """A closed position whose lifecycle orders used the given brokers."""
     run = PipelineRun(kind=RunKind.committee, ticker=ticker)
-    db.add(run); db.flush()
+    db.add(run)
+    db.flush()
     art = ResearchArtifact(run_id=run.id, ticker=ticker, agent_slug="investor",
                            artifact_type="verdict", content={})
-    db.add(art); db.flush()
+    db.add(art)
+    db.flush()
     th = TradeThesis(run_id=run.id, verdict_artifact_id=art.id, ticker=ticker,
                      direction=Direction.bullish, instrument=Instrument.shares,
                      entry_zone_low=99, entry_zone_high=101, stop_price=95,
                      status=ThesisStatus.executed)
-    db.add(th); db.flush()
+    db.add(th)
+    db.flush()
     p = Position(thesis_id=th.id, ticker=ticker, symbol=ticker,
                  instrument=Instrument.shares, qty=0, avg_price=100.0,
                  status=PositionStatus.closed, opened_at=utcnow(),
                  closed_at=utcnow())
-    db.add(p); db.flush()
+    db.add(p)
+    db.flush()
     for i, b in enumerate(brokers):
         o = Order(thesis_id=th.id, position_id=p.id,
                   side=OrderSide.buy if i == 0 else OrderSide.sell,
@@ -97,19 +117,23 @@ def test_no_l2_period_means_no_eligible_cohort(db):
 def test_option_fees_reach_realized_pnl(db, monkeypatch):
     monkeypatch.setattr(paper_broker, "mark_price", lambda db, o: 4.0)
     run = PipelineRun(kind=RunKind.committee, ticker="OPT")
-    db.add(run); db.flush()
+    db.add(run)
+    db.flush()
     art = ResearchArtifact(run_id=run.id, ticker="OPT", agent_slug="investor",
                            artifact_type="verdict", content={})
-    db.add(art); db.flush()
+    db.add(art)
+    db.flush()
     th = TradeThesis(run_id=run.id, verdict_artifact_id=art.id, ticker="OPT",
                      direction=Direction.bullish, instrument=Instrument.option,
                      entry_zone_low=99, entry_zone_high=101, stop_price=95,
                      status=ThesisStatus.approved)
-    db.add(th); db.flush()
+    db.add(th)
+    db.flush()
     buy = Order(thesis_id=th.id, side=OrderSide.buy, instrument=Instrument.option,
                 symbol="OPT_2026-08-21_call_100.0", qty=1,
                 reason=OrderReason.entry, status=OrderStatus.approved)
-    db.add(buy); db.flush()
+    db.add(buy)
+    db.flush()
     paper_broker.submit(db, buy)
     pos = paper_broker.apply_fill_to_position(db, buy, th)
     # cost basis carries the entry fee: 4.04 + 0.65/100
@@ -117,7 +141,8 @@ def test_option_fees_reach_realized_pnl(db, monkeypatch):
     sell = Order(thesis_id=th.id, position_id=pos.id, side=OrderSide.sell,
                  instrument=Instrument.option, symbol=buy.symbol, qty=1,
                  reason=OrderReason.exit, status=OrderStatus.approved)
-    db.add(sell); db.flush()
+    db.add(sell)
+    db.flush()
     paper_broker.submit(db, sell)
     paper_broker.apply_fill_to_position(db, sell, th)
     # exit at 3.96 (mid - 1%), minus exit fee: P&L must include BOTH fees
@@ -132,7 +157,8 @@ def test_cash_check_includes_fees(db, monkeypatch):
               side=OrderSide.buy, instrument=Instrument.option,
               symbol="ZZZ_2026-08-21_call_100.0", qty=1,
               reason=OrderReason.entry, status=OrderStatus.approved)
-    db.add(o); db.flush()
+    db.add(o)
+    db.flush()
     paper_broker.submit(db, o)
     assert o.status == OrderStatus.rejected  # fee pushes it past available cash
 
@@ -167,7 +193,6 @@ def test_fingerprint_change_restarts_l2_clock(db, monkeypatch):
 def test_unconfirmed_cancel_aborts_exit_without_restore(db, monkeypatch):
     """If the broker cannot confirm the stop was cancelled, selling could
     double-fill: the exit must abort and the stop row must stay ACTIVE."""
-    from midas.models import StandingStop
 
     monkeypatch.setattr(paper_broker, "mark_price", lambda db, o: 100.0)
     monkeypatch.setattr(paper_broker, "_cancel_standing_stop",
@@ -183,7 +208,8 @@ def test_unconfirmed_cancel_aborts_exit_without_restore(db, monkeypatch):
                        side=OrderSide.sell, instrument=Instrument.shares,
                        symbol="ABT", qty=10, reason=OrderReason.exit,
                        status=OrderStatus.approved)
-    db.add(exit_order); db.flush()
+    db.add(exit_order)
+    db.flush()
     paper_broker.submit(db, exit_order)
     assert exit_order.status == OrderStatus.rejected
     assert "double-sell" in exit_order.error
@@ -215,14 +241,16 @@ def test_failed_exit_restores_standing_stop(db, monkeypatch):
                        side=OrderSide.sell, instrument=Instrument.shares,
                        symbol="RST", qty=10, reason=OrderReason.exit,
                        status=OrderStatus.approved)
-    db.add(exit_order); db.flush()
+    db.add(exit_order)
+    db.flush()
     paper_broker.submit(db, exit_order)
     assert exit_order.status == OrderStatus.rejected  # fail-closed
     assert restored == [p.id]  # and the stop went straight back
 
 
 def test_update_setting_whitelist_and_env_write(tmp_path, monkeypatch):
-    from midas.config import settings as cfg, update_setting
+    from midas.config import settings as cfg
+    from midas.config import update_setting
 
     env = tmp_path / ".env"
     env.write_text("OPENAI_API_KEY=secret-stays\nWATCHLIST=OLD\nWATCHLIST=DUP\n",
@@ -238,7 +266,7 @@ def test_update_setting_whitelist_and_env_write(tmp_path, monkeypatch):
     import pytest as _pt
     with _pt.raises(ValueError):
         update_setting("OPENAI_API_KEY", "steal", env_path=env)  # not editable
-    with _pt.raises(Exception):
+    with _pt.raises(ValueError):  # pydantic ValidationError is a ValueError
         update_setting("AUTONOMY_LEVEL", "3", env_path=env)  # L3 still refused
 
 
@@ -260,7 +288,8 @@ def test_option_order_payload_spread_entry_and_exit(db):
                   side=OrderSide.buy, instrument=Instrument.option,
                   symbol="NVDA_2026-08-21_call_210.0x220.0", qty=2,
                   reason=OrderReason.entry, status=OrderStatus.approved)
-    db.add(entry); db.flush()
+    db.add(entry)
+    db.flush()
     pl = option_order_payload(entry, 3.5)
     assert pl["order_class"] == "mleg" and pl["qty"] == "2"
     assert pl["limit_price"] == "3.57"  # pays 2% through the mid
@@ -270,7 +299,8 @@ def test_option_order_payload_spread_entry_and_exit(db):
     exit_o = Order(thesis_id=entry.thesis_id, side=OrderSide.sell,
                    instrument=Instrument.option, symbol=entry.symbol, qty=2,
                    reason=OrderReason.exit, status=OrderStatus.approved)
-    db.add(exit_o); db.flush()
+    db.add(exit_o)
+    db.flush()
     pl2 = option_order_payload(exit_o, 5.0)
     assert pl2["limit_price"] == "4.90"  # gives up 2% on the way out
     assert pl2["legs"][0]["position_intent"] == "sell_to_close"
@@ -280,7 +310,8 @@ def test_option_order_payload_spread_entry_and_exit(db):
                    instrument=Instrument.option,
                    symbol="NVDA_2026-08-21_call_210.0", qty=1,
                    reason=OrderReason.entry, status=OrderStatus.approved)
-    db.add(single); db.flush()
+    db.add(single)
+    db.flush()
     pl3 = option_order_payload(single, 8.0)
     assert "order_class" not in pl3 and pl3["symbol"] == "NVDA260821C00210000"
 
@@ -413,8 +444,7 @@ def test_counterfactual_stats_split(db):
     from midas.outcomes.scoring import stats
 
     # traded ticker: has an executed thesis
-    p = _closed_position(db, "WIN", 100.0,
-                         [Broker.alpaca_paper, Broker.alpaca_paper])
+    _closed_position(db, "WIN", 100.0, [Broker.alpaca_paper, Broker.alpaca_paper])
     db.add(ScreenCandidate(ticker="WIN", score=90, price_at_screen=100,
                            fwd_10d_pct=5.0))
     db.add(ScreenCandidate(ticker="SKIP1", score=70, price_at_screen=50,
@@ -429,7 +459,7 @@ def test_counterfactual_stats_split(db):
 
 
 def test_post_mortem_runs_once_and_yields_lesson(factory, demo_router):
-    from midas.models import ArtifactType, TradeOutcome
+    from midas.models import TradeOutcome
     from midas.scheduler.monitor import recent_lessons, run_post_mortems
 
     with factory() as db:
@@ -448,7 +478,7 @@ def _bars(closes, vols=None):
     vols = vols or [1_000_000] * len(closes)
     return [{"close": c, "high": c * 1.01, "low": c * 0.99,
              "open": c, "volume": v, "date": "2026-01-01"}
-            for c, v in zip(closes, vols)]
+            for c, v in zip(closes, vols, strict=True)]
 
 
 def test_setup_score_rewards_orderly_pullback():

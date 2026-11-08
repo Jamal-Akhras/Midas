@@ -13,8 +13,9 @@ Quality rules enforced here:
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -22,7 +23,11 @@ from sqlalchemy.orm import Session
 
 from midas.models import CostEvent, ModelCall
 from midas.providers.base import (
-    Message, ModelProvider, ModelResponse, ProviderError, ToolSpec,
+    Message,
+    ModelProvider,
+    ModelResponse,
+    ProviderError,
+    ToolSpec,
 )
 
 T = TypeVar("T", bound=BaseModel)

@@ -3,6 +3,7 @@ API/data calls. Fixtures are realistic in SHAPE (same keys the real tools
 return) but the values are synthetic - clearly labeled source='demo'.
 """
 from datetime import date, timedelta
+from typing import Any
 
 
 def _iso(d: date) -> str:
@@ -13,7 +14,7 @@ TODAY = date.today()
 
 DEMO_UNIVERSE = ["ACME", "BOLT", "CRUX", "DUNE", "EMBR"]
 
-QUOTES = {
+QUOTES: dict[str, dict[str, Any]] = {
     "ACME": {"price": 184.20, "prev_close": 181.10, "avg_volume": 8_400_000, "sector": "Technology"},
     "BOLT": {"price": 62.35, "prev_close": 63.90, "avg_volume": 3_100_000, "sector": "Industrials"},
     "CRUX": {"price": 12.05, "prev_close": 12.10, "avg_volume": 650_000, "sector": "Energy"},

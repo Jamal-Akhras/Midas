@@ -5,8 +5,14 @@ from sqlalchemy import select
 
 from midas.config import Settings, settings
 from midas.models import (
-    ApprovalRequest, Broker, Order, OrderStatus, Position, PositionStatus,
-    ThesisStatus, TradeThesis,
+    ApprovalRequest,
+    Broker,
+    Order,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    ThesisStatus,
+    TradeThesis,
 )
 from midas.pipeline.committee import run_committee
 from midas.scheduler.monitor import run_monitor_once
@@ -18,9 +24,9 @@ def demo_mode(monkeypatch):
 
 
 def test_autonomy_above_2_is_rejected_at_config_time():
-    with pytest.raises(Exception, match="real-order code path"):
+    with pytest.raises(ValueError, match="real-order code path"):
         Settings(autonomy_level=3)
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         Settings(autonomy_level=4)
 
 
@@ -52,7 +58,7 @@ def test_l1_auto_executes_entry_but_proposes_exits(factory, demo_router, monkeyp
     with factory() as db:
         order = db.scalar(select(Order))
         assert order.status == OrderStatus.filled
-        assert "investor_agent(L1)" == order.approved_by
+        assert order.approved_by == "investor_agent(L1)"
         # exits at L1 still go through the operator
         from midas.execution.executor import propose_or_execute_exit
 
@@ -76,4 +82,4 @@ def test_l2_auto_executes_exits(factory, demo_router, monkeypatch):
         db.commit()
         assert isinstance(result, Order)
         assert result.status == OrderStatus.filled
-        assert "investor_agent(L2)" == result.approved_by
+        assert result.approved_by == "investor_agent(L2)"

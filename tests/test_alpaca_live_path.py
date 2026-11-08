@@ -1,6 +1,5 @@
 """Live-path plumbing that must work offline: OCC symbol parsing, chain
 assembly from Alpaca snapshot payloads, and mirror fallback behavior."""
-import pytest
 
 from midas.config import settings
 from midas.tools.market_data import _chain_from_snapshots, _occ_meta
@@ -52,9 +51,10 @@ def test_chain_filters_far_strikes_and_stale_expiries():
 
 
 def test_mirror_disabled_without_keys(monkeypatch):
+    import uuid
+
     from midas.execution.paper_broker import _mirror_to_alpaca
     from midas.models import Instrument, Order, OrderReason, OrderSide
-    import uuid
 
     monkeypatch.setattr(settings, "alpaca_api_key", "")
     monkeypatch.setattr(settings, "alpaca_api_secret", "")
@@ -65,9 +65,10 @@ def test_mirror_disabled_without_keys(monkeypatch):
 
 
 def test_mirror_never_touches_options(monkeypatch):
+    import uuid
+
     from midas.execution.paper_broker import _mirror_to_alpaca
     from midas.models import Instrument, Order, OrderReason, OrderSide
-    import uuid
 
     monkeypatch.setattr(settings, "alpaca_api_key", "k")
     monkeypatch.setattr(settings, "alpaca_api_secret", "s")

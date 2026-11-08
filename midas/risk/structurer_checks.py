@@ -2,6 +2,7 @@
 premium sanity. The LLM assist picks only from candidates that pass here,
 and its pick is re-validated afterwards. Hard checks in CODE, always."""
 from dataclasses import dataclass
+from typing import Any
 
 from midas.config import settings
 
@@ -22,10 +23,11 @@ class ChainContract:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ChainContract":
-        return cls(**{k: d.get(k) for k in (
+        fields: dict[str, Any] = {k: d.get(k) for k in (
             "expiry", "dte", "type", "strike", "bid", "ask", "mid",
             "open_interest", "volume", "iv", "delta",
-        )})
+        )}
+        return cls(**fields)
 
 
 def contract_checks(c: ChainContract) -> dict[str, dict]:

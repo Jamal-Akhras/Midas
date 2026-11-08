@@ -22,18 +22,34 @@ from midas.audit import record_event
 from midas.config import settings
 from midas.db import init_db, session_factory
 from midas.execution.executor import resolve_approval
-from midas.execution.paper_broker import get_account, refresh_equity
+from midas.execution.paper_broker import get_account
 from midas.models import (
-    ActorType, ApprovalRequest, ApprovalStatus, ArtifactType, AuditEvent, CostEvent,
-    DataSnapshot, EquityPoint, Instrument, ModelCall, Order, PipelineRun,
-    Position, PositionStatus, ResearchArtifact, ReviewCheckpoint, SystemState,
-    TradeOutcome, TradeThesis, aware, utcnow,
+    ActorType,
+    ApprovalRequest,
+    ApprovalStatus,
+    ArtifactType,
+    AuditEvent,
+    CostEvent,
+    DataSnapshot,
+    EquityPoint,
+    Instrument,
+    ModelCall,
+    Order,
+    PipelineRun,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    ReviewCheckpoint,
+    SystemState,
+    TradeOutcome,
+    TradeThesis,
+    aware,
+    utcnow,
 )
-from midas.models.history import record_equity_point
+from midas.models.domain import StandingStop
 from midas.outcomes.scoring import stats
 from midas.pipeline.runner import latest_artifact_for_ticker
 from midas.providers.router import get_router
-from midas.models.domain import StandingStop
 from midas.risk.engine import clear_halt, get_halt, open_notional_usd, open_premium_usd
 from midas.tools import market_data
 
@@ -334,7 +350,6 @@ def build_state() -> dict:
         regime_row = db.get(SystemState, "market_regime")
         gate_utc = None
         try:
-            from datetime import datetime as _dtm
 
             from zoneinfo import ZoneInfo
 

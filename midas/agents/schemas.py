@@ -6,7 +6,6 @@ sources; anything without a source belongs in `unverified`.
 """
 from pydantic import BaseModel, Field, model_validator
 
-
 # ---------- screener ----------
 
 class ScreenCandidate(BaseModel):

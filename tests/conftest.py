@@ -17,7 +17,8 @@ def factory():
         poolclass=StaticPool,
     )
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, expire_on_commit=False)
+    yield sessionmaker(bind=engine, expire_on_commit=False)
+    engine.dispose()
 
 
 @pytest.fixture()

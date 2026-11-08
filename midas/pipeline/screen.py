@@ -1,7 +1,7 @@
 """Universe screen: Screener Agent scans for setup candidates, then a
 deterministic filter re-checks price/volume floors on the cited numbers."""
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 from sqlalchemy.orm import Session
 
@@ -9,9 +9,9 @@ from midas.agents.defs import AGENT_DEFS
 from midas.audit import record_event
 from midas.config import settings
 from midas.models import ActorType, PipelineRun, RunKind, RunStatus
+from midas.pipeline.runner import run_agent_stage
 from midas.providers.router import ModelRouter
 from midas.risk.engine import get_halt
-from midas.pipeline.runner import run_agent_stage
 from midas.tools.demo_data import DEMO_UNIVERSE
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
         run_id = run.id
 
     with session_factory() as db:
-        run = db.get(PipelineRun, run_id)
+        run = db.get_one(PipelineRun, run_id)
         tickers = universe_tickers()
         from midas.models import SystemState
         from midas.models.base import utcnow as _now

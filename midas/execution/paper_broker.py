@@ -12,8 +12,18 @@ from sqlalchemy.orm import Session
 
 from midas.audit import record_event
 from midas.models import (
-    ActorType, Broker, Instrument, Order, OrderReason, OrderSide, OrderStatus,
-    Position, PositionStatus, SystemState, TradeThesis, utcnow,
+    ActorType,
+    Broker,
+    Instrument,
+    Order,
+    OrderReason,
+    OrderSide,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    SystemState,
+    TradeThesis,
+    utcnow,
 )
 from midas.tools.base import ToolContext
 from midas.tools.registry import TOOLS
@@ -286,7 +296,7 @@ def effective_stop(db: Session, position: Position) -> float | None:
     return thesis.stop_price if thesis else None
 
 
-def _cancel_standing_stop(db: Session, position_id) -> None:
+def _cancel_standing_stop(db: Session, position_id) -> bool | None:
     """Cancel the resting Alpaca stop before any other sell of the same
     shares - Alpaca holds shares against open orders, so a mirrored sell
     would otherwise be rejected (or worse, both could fill)."""
@@ -548,9 +558,10 @@ def submit(db: Session, order: Order) -> Order:
         price = round(price * (1 + slip if order.side == OrderSide.buy else 1 - slip), 4)
         legs = 2 if "x" in order.symbol.rsplit("_", 1)[-1] else 1
         fee = round(settings.option_fee_per_contract * order.qty * legs, 2)
-    if order.limit_price is not None:
-        if (order.side == OrderSide.buy and price > order.limit_price) or \
-           (order.side == OrderSide.sell and price < order.limit_price):
+    if order.limit_price is not None and (
+        (order.side == OrderSide.buy and price > order.limit_price)
+        or (order.side == OrderSide.sell and price < order.limit_price)
+    ):
             order.status = OrderStatus.rejected
             order.error = f"market {price} beyond limit {order.limit_price}"
             record_event(db, event_type="order.rejected",
@@ -575,7 +586,7 @@ def submit(db: Session, order: Order) -> Order:
     # dashboard becomes an independent record of every trade.
     fill_source = "sim"
     alpaca_id = None
-    cancelled_stop = False
+    cancelled_stop: bool | None = False
     if (order.side == OrderSide.sell and order.instrument == Instrument.shares
             and order.position_id):
         cancelled_stop = _cancel_standing_stop(db, order.position_id)
@@ -632,7 +643,7 @@ def submit(db: Session, order: Order) -> Order:
 
 def apply_fill_to_position(db: Session, order: Order, thesis, sector: str = "") -> Position:
     """Update or create the Position for a filled order."""
-    assert order.status == OrderStatus.filled
+    assert order.status == OrderStatus.filled and order.filled_price is not None
     position = db.get(Position, order.position_id) if order.position_id else None
     fee = order.fees_usd or 0.0
     multiplier_f = 100 if order.instrument == Instrument.option else 1

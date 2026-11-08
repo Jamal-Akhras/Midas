@@ -4,6 +4,7 @@ attributed, artifact stored, audit written. Commit is the caller's boundary
 import json
 import logging
 import uuid
+from typing import TypeVar
 
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -13,13 +14,21 @@ from midas.agents.defs import INJECTION_GUARD, AgentDef, fence, load_prompt
 from midas.audit import record_event
 from midas.config import settings
 from midas.models import (
-    ActorType, ArtifactType, CostEvent, PipelineRun, ResearchArtifact, aware, utcnow,
+    ActorType,
+    ArtifactType,
+    CostEvent,
+    PipelineRun,
+    ResearchArtifact,
+    aware,
+    utcnow,
 )
 from midas.providers.router import ModelRouter
 from midas.tools.base import ToolContext
 from midas.tools.registry import toolset
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class StageError(Exception):
@@ -61,6 +70,16 @@ def existing_artifact(db: Session, run_id: uuid.UUID,
     )
 
 
+def required_artifact(db: Session, run_id: uuid.UUID,
+                      artifact_type: ArtifactType) -> ResearchArtifact:
+    """An upstream artifact a later stage cannot run without. Missing means
+    the pipeline was invoked out of order or the run is corrupt: fail loud."""
+    art = existing_artifact(db, run_id, artifact_type)
+    if art is None:
+        raise StageError(f"run {run_id} has no {artifact_type.value} artifact")
+    return art
+
+
 def latest_artifact_for_ticker(db: Session, ticker: str,
                                artifact_type: ArtifactType) -> ResearchArtifact | None:
     return db.scalar(
@@ -88,9 +107,9 @@ def fence_upstream(db: Session, run: PipelineRun, reads: list[ArtifactType]) -> 
 
 
 def run_agent_stage(
-    db: Session, router: ModelRouter, run: PipelineRun, agent: AgentDef,
+    db: Session, router: ModelRouter, run: PipelineRun, agent: AgentDef[T],
     *, task_text: str, ticker: str = "", extra_context: str = "",
-) -> tuple[ResearchArtifact, BaseModel]:
+) -> tuple[ResearchArtifact, T]:
     """Execute one agent stage. Skips (returns stored artifact) if this run
     already produced this artifact type - that is the crash-resume path."""
     existing = existing_artifact(db, run.id, agent.artifact_type)

@@ -50,7 +50,7 @@ def get_filings(ticker: str, forms: str = "10-K,10-Q,8-K,DEF 14A", limit: int = 
         out = []
         for form, filed, accession, doc in zip(
             recent["form"], recent["filingDate"],
-            recent["accessionNumber"], recent["primaryDocument"],
+            recent["accessionNumber"], recent["primaryDocument"], strict=True,
         ):
             if wanted and form.upper() not in wanted:
                 continue
@@ -81,7 +81,7 @@ def get_insider_transactions(ticker: str, limit: int = 10) -> ToolResult:
         out = []
         for form, filed, accession, doc in zip(
             recent["form"], recent["filingDate"],
-            recent["accessionNumber"], recent["primaryDocument"],
+            recent["accessionNumber"], recent["primaryDocument"], strict=True,
         ):
             if form != "4":
                 continue

@@ -1,15 +1,25 @@
 """Execution integrity: the ledger's mirrored fills must match Alpaca's
 records exactly - unattended runs test execution as much as decisions."""
-import uuid
 
-import pytest
 from sqlalchemy import select
 
 from midas.execution.paper_broker import reconcile_mirrored_orders
 from midas.models import (
-    ArtifactType, AuditEvent, Broker, Direction, Instrument, Order,
-    OrderReason, OrderSide, OrderStatus, PipelineRun, ResearchArtifact,
-    RunKind, ThesisStatus, TradeThesis, utcnow,
+    ArtifactType,
+    AuditEvent,
+    Broker,
+    Direction,
+    Instrument,
+    Order,
+    OrderReason,
+    OrderSide,
+    OrderStatus,
+    PipelineRun,
+    ResearchArtifact,
+    RunKind,
+    ThesisStatus,
+    TradeThesis,
+    utcnow,
 )
 
 

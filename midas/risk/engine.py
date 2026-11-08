@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from midas.config import settings
 from midas.models import (
-    Instrument, Position, PositionStatus, SystemState, TradeOutcome, aware, utcnow,
+    Instrument,
+    Position,
+    PositionStatus,
+    SystemState,
+    TradeOutcome,
+    aware,
+    utcnow,
 )
 
 HALT_KEY = "pipeline_halt"

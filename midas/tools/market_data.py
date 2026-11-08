@@ -1,6 +1,8 @@
 """Market data + options chains. Provider order: Alpaca (paper keys, free)
 -> yfinance (no key) -> demo fixtures. Source is always reported honestly."""
 import logging
+import re
+from typing import Any
 
 import httpx
 
@@ -158,9 +160,7 @@ def get_daily_bars(ticker: str, days: int = 60) -> ToolResult:
     raise ToolError(f"no bar data source available for {ticker}")
 
 
-import re as _re
-
-_OCC = _re.compile(r"^([A-Z]+)(\d{6})([CP])(\d{8})$")
+_OCC = re.compile(r"^([A-Z]+)(\d{6})([CP])(\d{8})$")
 
 
 def _occ_meta(symbol: str) -> dict | None:
@@ -215,7 +215,7 @@ def _alpaca_option_chain(ticker: str) -> list[dict]:
     quote = get_quote(ticker).data
     spot = float(quote["price"])
     snapshots: dict = {}
-    params = {"feed": "indicative", "limit": 1000}
+    params: dict[str, Any] = {"feed": "indicative", "limit": 1000}
     for _ in range(4):  # a few pages is plenty inside the +-15% band
         r = httpx.get(
             f"{settings.alpaca_data_base_url}/v1beta1/options/snapshots/{ticker}",
@@ -265,7 +265,7 @@ def get_options_chain(ticker: str) -> ToolResult:
         try:
             t = yf.Ticker(ticker)
             spot = float(t.fast_info["lastPrice"])
-            chain: list[dict] = []
+            chain = []
             from datetime import date
 
             for expiry in t.options[:8]:

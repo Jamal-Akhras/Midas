@@ -5,8 +5,9 @@ the audit trail must show the data the decision saw. The executor wraps
 raw tool data with source + retrieved_at so agents can cite both.
 """
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from sqlalchemy.orm import Session
 

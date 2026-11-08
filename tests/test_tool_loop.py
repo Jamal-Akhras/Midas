@@ -84,7 +84,7 @@ def test_every_loop_iteration_is_cost_logged(db):
 
 
 def test_artifact_stamping_links_snapshots(db):
-    from midas.models import ResearchArtifact, ArtifactType
+    from midas.models import ArtifactType, ResearchArtifact
 
     out, provider, ctx, run = run_with_script(
         db, [[("get_price", {"ticker": "ACME"})], "done", GOOD])

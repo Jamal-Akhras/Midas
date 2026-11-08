@@ -17,9 +17,20 @@ from midas.audit import record_event
 from midas.config import settings
 from midas.execution import paper_broker
 from midas.models import (
-    ActorType, ApprovalRequest, ApprovalStatus, Instrument, OptionStructure,
-    Order, OrderReason, OrderSide, OrderStatus, Position, PositionStatus,
-    ThesisStatus, TradeThesis, utcnow,
+    ActorType,
+    ApprovalRequest,
+    ApprovalStatus,
+    Instrument,
+    OptionStructure,
+    Order,
+    OrderReason,
+    OrderSide,
+    OrderStatus,
+    Position,
+    PositionStatus,
+    ThesisStatus,
+    TradeThesis,
+    utcnow,
 )
 from midas.risk import engine as risk_engine
 
@@ -186,6 +197,8 @@ def execute_approved_exit(db: Session, approval: ApprovalRequest) -> Order:
     if approval.status != ApprovalStatus.approved:
         raise ExecutionRefused("exit approval is not approved")
     position = db.get(Position, uuid.UUID(approval.context["position_id"]))
+    if position is None:
+        raise ExecutionRefused("exit approval refers to a position that no longer exists")
     thesis = db.get(TradeThesis, position.thesis_id)
     decision = approval.context["decision"]
     order = Order(
@@ -207,6 +220,7 @@ def _schedule_first_review(db: Session, thesis: TradeThesis, order: Order) -> No
     from datetime import timedelta
 
     position = db.get(Position, order.position_id)
+    assert position is not None, "a filled entry order always has a position"
     cadence = int((thesis.review_schedule or {}).get("cadence_days", 1))
     position.next_review_at = utcnow() + timedelta(days=cadence)
     db.flush()
@@ -227,6 +241,8 @@ def resolve_approval(db: Session, approval: ApprovalRequest, *, approve: bool,
     )
     if approval.subject_type == "thesis":
         thesis = db.get(TradeThesis, approval.subject_id)
+        if thesis is None:
+            raise ExecutionRefused("approval refers to a thesis that no longer exists")
         thesis.status = ThesisStatus.approved if approve else ThesisStatus.rejected
         if approve:
             execute_thesis(db, thesis, approved_by="operator")

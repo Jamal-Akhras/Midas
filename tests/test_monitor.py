@@ -7,6 +7,7 @@ def test_portfolio_review_skips_empty_book(factory, demo_router):
 
 def test_portfolio_action_schema_normalizes_and_guards():
     import pytest
+
     from midas.agents.schemas import PortfolioAction
 
     a = PortfolioAction(ticker="nvda", decision="SELL", reasons=["thesis broken"])

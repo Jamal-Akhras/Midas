@@ -11,6 +11,7 @@ the ticker is read from a 'Ticker: XXX' line in the conversation.
 import json
 import re
 import uuid
+from collections.abc import Callable
 
 from midas.providers.base import Message, ModelResponse, ToolCall, ToolSpec
 from midas.tools.demo_data import QUOTES
@@ -180,7 +181,7 @@ def _reevaluation(ticker: str) -> dict:
 
 
 # slug -> (scripted tool calls, final output builder)
-SCRIPTS: dict[str, tuple[list[tuple[str, dict]], object]] = {
+SCRIPTS: dict[str, tuple[list[tuple[str, dict]], Callable[[str], dict]]] = {
     "screener": ([("get_quote", {"ticker": "ACME"}), ("get_quote", {"ticker": "DUNE"}),
                   ("get_daily_bars", {"ticker": "ACME", "days": 60})], _screen),
     "fundamentals": ([("get_earnings", {"ticker": "TICKER"})], _fundamentals),

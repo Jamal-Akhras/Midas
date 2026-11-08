@@ -8,12 +8,19 @@ from sqlalchemy import select
 from midas.config import settings
 from midas.execution import executor
 from midas.models import (
-    ApprovalRequest, ApprovalStatus, ArtifactType, CheckpointTrigger,
-    PipelineRun, Position, ResearchArtifact, RunKind, utcnow,
+    ApprovalRequest,
+    ApprovalStatus,
+    ArtifactType,
+    CheckpointTrigger,
+    PipelineRun,
+    Position,
+    ResearchArtifact,
+    RunKind,
+    utcnow,
 )
+from midas.outcomes.digest import build_digest
 from midas.pipeline.committee import run_committee
 from midas.scheduler.monitor import due_positions
-from midas.outcomes.digest import build_digest
 
 
 @pytest.fixture(autouse=True)

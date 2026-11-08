@@ -12,8 +12,8 @@ same run resumes past completed artifacts.
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import date
-from typing import Callable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,12 +22,25 @@ from midas.agents.defs import AGENT_DEFS
 from midas.audit import record_event
 from midas.config import settings
 from midas.models import (
-    ActorType, ApprovalRequest, ArtifactType, Direction, Instrument,
-    OptionStrategy, OptionStructure, OptionType, PipelineRun, ResearchArtifact,
-    RunKind, RunStatus, ThesisStatus, TradeThesis,
+    ActorType,
+    ApprovalRequest,
+    ArtifactType,
+    Direction,
+    Instrument,
+    OptionStrategy,
+    OptionStructure,
+    OptionType,
+    PipelineRun,
+    RunKind,
+    RunStatus,
+    ThesisStatus,
+    TradeThesis,
 )
 from midas.pipeline.runner import (
-    check_daily_spend, existing_artifact, render_content, run_agent_stage,
+    check_daily_spend,
+    existing_artifact,
+    required_artifact,
+    run_agent_stage,
     store_code_artifact,
 )
 from midas.providers.router import ModelRouter
@@ -176,8 +189,8 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
     # ---- options structurer: code candidates -> LLM assist -> code re-validation ----
     with session_factory() as db:
         run = db.get(PipelineRun, run_id)
-        bull = existing_artifact(db, run_id, ArtifactType.bull_case).content
-        bear = existing_artifact(db, run_id, ArtifactType.bear_case).content
+        bull = required_artifact(db, run_id, ArtifactType.bull_case).content
+        bear = required_artifact(db, run_id, ArtifactType.bear_case).content
         direction = ("bullish" if float(bull["conviction"]) >= float(bear["conviction"])
                      else "bearish")
         expected_move = float(bull["expected_move_pct"] if direction == "bullish"
@@ -238,7 +251,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                         note = "LLM pick was off-list; code fell back to the first candidate"
                     else:
                         note = "LLM pick validated against code candidates"
-                    art = existing_artifact(db2, run_id, ArtifactType.structure)
+                    art = required_artifact(db2, run_id, ArtifactType.structure)
                     art.content = {**art.content, "available": True,
                                    "validated_pick": validated, "direction": direction,
                                    "spot": spot, "validation_note": note}
@@ -251,7 +264,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
     # ---- risk engine (deterministic) ----
     with session_factory() as db:
         run = db.get(PipelineRun, run_id)
-        structure = existing_artifact(db, run_id, ArtifactType.structure).content
+        structure = required_artifact(db, run_id, ArtifactType.structure).content
         equity = _account_equity(db)
         if structure.get("available"):
             pick = structure["validated_pick"]
@@ -316,8 +329,8 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 f"{len(_positions)}/{settings.max_open_positions} position "
                 "slots used." + _lessons_block),
         )
-        risk_content = existing_artifact(db, run_id, ArtifactType.risk_check).content
-        structure = existing_artifact(db, run_id, ArtifactType.structure).content
+        risk_content = required_artifact(db, run_id, ArtifactType.risk_check).content
+        structure = required_artifact(db, run_id, ArtifactType.structure).content
 
         if verdict.verdict != "trade":
             return _done(db, run, f"no_trade: {verdict.no_trade_reason}")

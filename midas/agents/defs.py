@@ -2,6 +2,7 @@
 these generically. Bull and bear run on different models via routing.yaml."""
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -24,12 +25,15 @@ def fence(name: str, author: str, body: str) -> str:
     return f'<committee_document name="{name}" author="{author}">\n{body}\n</committee_document>'
 
 
+T = TypeVar("T", bound=BaseModel)
+
+
 @dataclass
-class AgentDef:
+class AgentDef(Generic[T]):
     slug: str
     task_type: str
     prompt_file: str
-    output_schema: type[BaseModel]
+    output_schema: type[T]
     artifact_type: ArtifactType
     toolset: str = ""              # key into tools.registry.TOOLSETS; "" = no tools
     risk_level: str = "low"
@@ -37,7 +41,7 @@ class AgentDef:
     reads: list[ArtifactType] = field(default_factory=list)  # upstream artifacts fenced into the prompt
 
 
-AGENT_DEFS: dict[str, AgentDef] = {d.slug: d for d in [
+_DEFS: list[AgentDef[Any]] = [
     AgentDef(
         slug="screener", task_type="screening", prompt_file="screener",
         output_schema=schemas.ScreenOutput, artifact_type=ArtifactType.screen_results,
@@ -106,4 +110,6 @@ AGENT_DEFS: dict[str, AgentDef] = {d.slug: d for d in [
         artifact_type=ArtifactType.portfolio_review,
         toolset="reevaluator", risk_level="high", max_tokens=3000,
     ),
-]}
+]
+
+AGENT_DEFS: dict[str, AgentDef[Any]] = {d.slug: d for d in _DEFS}

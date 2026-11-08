@@ -7,9 +7,20 @@ from sqlalchemy import select
 
 from midas.config import settings
 from midas.models import (
-    ArtifactType, CostEvent, Direction, Instrument, PipelineRun, Position,
-    PositionStatus, ResearchArtifact, RunKind, ThesisStatus, TradeOutcome,
-    TradeThesis, aware, utcnow,
+    ArtifactType,
+    CostEvent,
+    Direction,
+    Instrument,
+    PipelineRun,
+    Position,
+    PositionStatus,
+    ResearchArtifact,
+    RunKind,
+    ThesisStatus,
+    TradeOutcome,
+    TradeThesis,
+    aware,
+    utcnow,
 )
 from midas.outcomes.scoring import stats
 from midas.pipeline.committee import run_committee
