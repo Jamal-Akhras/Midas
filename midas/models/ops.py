@@ -25,6 +25,9 @@ class CostEvent(PKMixin, TimestampMixin, Base):
     tokens_in: Mapped[int] = mapped_column(Integer, default=0)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    # independent second ledger: what the LLM gateway charged, when one is in
+    # front of the vendor (NULL = no gateway on this call)
+    gateway_cost_usd: Mapped[float | None] = mapped_column(Float)
     latency_ms: Mapped[int] = mapped_column(Integer, default=0)
 
 

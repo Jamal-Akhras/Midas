@@ -6,9 +6,20 @@ import time
 import httpx
 
 from midas.config import settings
-from midas.providers.base import Message, ModelResponse, ProviderError, ToolCall, ToolSpec
+from midas.providers.base import (
+    Message,
+    ModelResponse,
+    ProviderError,
+    ToolCall,
+    ToolSpec,
+    gateway_cost,
+)
 
-API_URL = "https://api.openai.com/v1/chat/completions"
+
+def _url() -> str:
+    """Chat Completions endpoint under OPENAI_BASE_URL (the vendor by default;
+    an OpenAI-format gateway such as Tollgate when configured)."""
+    return settings.openai_base_url.rstrip("/") + "/chat/completions"
 
 
 class OpenAIProvider:
@@ -49,7 +60,7 @@ class OpenAIProvider:
             for attempt in (1, 2, 3):
                 try:
                     resp = httpx.post(
-                        API_URL,
+                        _url(),
                         json=payload,
                         timeout=120,
                         headers={"Authorization": f"Bearer {settings.openai_api_key}"},
@@ -95,6 +106,7 @@ class OpenAIProvider:
             tokens_in=usage.get("prompt_tokens", 0),
             tokens_out=usage.get("completion_tokens", 0),
             latency_ms=int((time.monotonic() - start) * 1000),
+            gateway_cost_usd=gateway_cost(resp.headers),
         )
 
 

@@ -7,9 +7,20 @@ import uuid
 import httpx
 
 from midas.config import settings
-from midas.providers.base import Message, ModelResponse, ProviderError, ToolCall, ToolSpec
+from midas.providers.base import (
+    Message,
+    ModelResponse,
+    ProviderError,
+    ToolCall,
+    ToolSpec,
+    gateway_cost,
+)
 
-API_URL = "https://api.anthropic.com/v1/messages"
+
+def _url() -> str:
+    """Messages endpoint under ANTHROPIC_BASE_URL (the vendor by default; a
+    gateway such as Tollgate serves it under /anthropic)."""
+    return settings.anthropic_base_url.rstrip("/") + "/v1/messages"
 
 
 class AnthropicProvider:
@@ -40,7 +51,7 @@ class AnthropicProvider:
         start = time.monotonic()
         try:
             resp = httpx.post(
-                API_URL,
+                _url(),
                 json=payload,
                 timeout=120,
                 headers={
@@ -80,6 +91,7 @@ class AnthropicProvider:
             tokens_in=usage.get("input_tokens", 0),
             tokens_out=usage.get("output_tokens", 0),
             latency_ms=int((time.monotonic() - start) * 1000),
+            gateway_cost_usd=gateway_cost(resp.headers),
         )
 
 

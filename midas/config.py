@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     anthropic_api_key: str = ""
     gemini_api_key: str = ""
+    # Base URLs: the vendors by default. Point them at an LLM gateway (see
+    # docs/tollgate.md) to put budgets and a tamper-evident audit trail in
+    # front of every call; the matching *_API_KEY then holds the gateway's
+    # tenant key. Gemini has no gateway path and always goes direct.
+    openai_base_url: str = "https://api.openai.com/v1"
+    anthropic_base_url: str = "https://api.anthropic.com"
     demo_mode: bool = False  # force demo even with keys present
 
     # --- data / tool providers (all free tiers; empty => demo fixtures) ---

@@ -206,9 +206,9 @@ def stats(db: Session) -> dict:
     # metric for whether it EVER could.
     cutoff = utcnow() - timedelta(days=30)
     pnl_30d = sum(o.pnl_usd for o in outcomes if aware(o.created_at) >= cutoff)
-    spend_30d = sum(
-        e.cost_usd for e in db.scalars(select(CostEvent)) if aware(e.created_at) >= cutoff
-    )
+    recent_costs = [e for e in db.scalars(select(CostEvent)) if aware(e.created_at) >= cutoff]
+    spend_30d = sum(e.cost_usd for e in recent_costs)
+    gateway_30d = [e.gateway_cost_usd for e in recent_costs if e.gateway_cost_usd is not None]
     from midas.models import ScreenCandidate
     from midas.models.domain import ThesisStatus
 
@@ -244,6 +244,8 @@ def stats(db: Session) -> dict:
         "self_funding": {
             "realized_pnl_30d": round(pnl_30d, 2),
             "ai_spend_30d": round(spend_30d, 4),
+            "gateway_spend_30d": (round(sum(gateway_30d), 4) if gateway_30d else None),
+            "gateway_calls_30d": len(gateway_30d),
             "ratio": (round(pnl_30d / spend_30d, 1) if spend_30d > 0 else None),
             "covers_costs": bool(spend_30d > 0 and pnl_30d > spend_30d),
             "note": "paper P&L vs real token cost - evidence, not income",

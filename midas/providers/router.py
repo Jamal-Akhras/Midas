@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 ROUTING_PATH = Path(__file__).parent / "routing.yaml"
 MAX_TOOL_ITERATIONS = 8
+GATEWAY_DRIFT_ALERT = 0.25  # fraction by which the gateway's charge may differ from our estimate
 
 # ToolExecutor: (tool_name, arguments) -> JSON-serializable result.
 # Raising ToolError produces an error message the model can react to.
@@ -109,10 +110,39 @@ class ModelRouter:
             tokens_in=resp.tokens_in,
             tokens_out=resp.tokens_out,
             cost_usd=cost,
+            gateway_cost_usd=resp.gateway_cost_usd,
             latency_ms=resp.latency_ms,
         )
         db.add(event)
         db.flush()
+        if resp.gateway_cost_usd is not None and cost > 0:
+            drift = abs(resp.gateway_cost_usd / cost - 1.0)
+            if drift > GATEWAY_DRIFT_ALERT:
+                # the two ledgers disagree: routing.yaml prices are stale, or the
+                # gateway's catalog is. Either way the cost log is wrong somewhere.
+                from midas.audit import record_event
+
+                logger.warning(
+                    "gateway cost %.4f vs estimate %.4f for %s (%.0f%% apart)",
+                    resp.gateway_cost_usd,
+                    cost,
+                    resp.model,
+                    drift * 100,
+                )
+                record_event(
+                    db,
+                    event_type="cost.divergence",
+                    summary=(
+                        f"{resp.model}: gateway charged ${resp.gateway_cost_usd:.4f}, "
+                        f"routing.yaml estimated ${cost:.4f} ({drift * 100:.0f}% apart)"
+                    ),
+                    run_id=run_id,
+                    payload={
+                        "gateway": resp.gateway_cost_usd,
+                        "estimate": cost,
+                        "model": resp.model,
+                    },
+                )
         db.add(
             ModelCall(
                 cost_event_id=event.id,

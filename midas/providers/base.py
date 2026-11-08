@@ -33,6 +33,10 @@ class ModelResponse:
     tokens_in: int = 0
     tokens_out: int = 0
     latency_ms: int = 0
+    # What an LLM gateway in front of the vendor charged for the call (the
+    # X-Tollgate-Cost header), when one is configured. A second, independent
+    # ledger next to the router's own price-table estimate.
+    gateway_cost_usd: float | None = None
 
 
 # Generic message shapes (provider adapters translate):
@@ -60,3 +64,18 @@ class ModelProvider(Protocol):
 
 class ProviderError(Exception):
     """Raised by providers on API failure; triggers router fallback."""
+
+
+GATEWAY_COST_HEADER = "X-Tollgate-Cost"
+
+
+def gateway_cost(headers: Any) -> float | None:
+    """Parse a gateway cost header such as '0.0412 USD'. Absent or
+    malformed -> None (no gateway, or not one we understand)."""
+    raw = headers.get(GATEWAY_COST_HEADER) if headers is not None else None
+    if not raw:
+        return None
+    try:
+        return float(str(raw).split()[0])
+    except (ValueError, IndexError):
+        return None
