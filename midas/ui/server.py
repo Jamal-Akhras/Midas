@@ -697,11 +697,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": type(exc).__name__}, 500)
 
 
-def serve(port: int = 8420) -> None:
+def serve(port: int = 8420, host: str = "127.0.0.1") -> None:
+    """Loopback by default: the console has no authentication. Pass another
+    host only behind a boundary you control (a container port mapping)."""
     init_db()
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
     mode = "DEMO" if settings.effective_demo_mode else "LIVE-PAPER"
-    print(f"Midas Analyst Workstation: http://127.0.0.1:{port}  [{mode}]")
+    print(f"Midas Analyst Workstation: http://{host}:{port}  [{mode}]")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -50,6 +50,8 @@ def main() -> None:
     p_audit.add_argument("--limit", type=int, default=30)
     p_ui = sub.add_parser("ui")
     p_ui.add_argument("--port", type=int, default=8420)
+    p_ui.add_argument("--host", default="127.0.0.1",
+                      help="bind address (loopback only by default; no auth)")
     args = parser.parse_args()
 
     from midas.config import settings
@@ -175,7 +177,7 @@ def main() -> None:
     elif args.cmd == "ui":
         from midas.ui.server import serve
 
-        serve(port=args.port)
+        serve(port=args.port, host=args.host)
     elif args.cmd == "audit":
         from midas.models import AuditEvent
 
