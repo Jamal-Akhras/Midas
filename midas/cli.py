@@ -13,6 +13,7 @@ midas stats                   track record vs the L3 bar
 midas halt [--clear]          show or clear the pipeline halt
 midas audit [--limit N]       recent audit trail
 midas ui [--port N]           launch the command center (local web console)
+midas research ...            backtests and docs/results.md (see midas research -h)
 """
 
 import argparse
@@ -55,7 +56,14 @@ def main() -> None:
     p_ui.add_argument(
         "--host", default="127.0.0.1", help="bind address (loopback only by default; no auth)"
     )
+    p_res = sub.add_parser("research", help="backtests; try: midas research -h")
+    p_res.add_argument("research_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
+
+    if args.cmd == "research":  # no database, no provider keys needed
+        from midas.research.cli import main as research_main
+
+        sys.exit(research_main(args.research_args))
 
     from midas.config import settings
     from midas.db import init_db, session_factory

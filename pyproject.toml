@@ -26,6 +26,12 @@ dev = [
     "pre-commit>=4,<5",
 ]
 live = ["yfinance>=0.2.40,<2"]
+research = [
+    "pandas>=2.0,<3",
+    "numpy>=1.26,<3",
+    "yfinance>=0.2.40,<2",
+    "lxml>=5,<7",
+]
 
 [project.urls]
 Repository = "https://github.com/Jamal-Akhras/Midas"
@@ -86,7 +92,9 @@ disallow_incomplete_defs = true
 disallow_untyped_calls = true
 disallow_any_generics = true
 disallow_untyped_decorators = true
-warn_return_any = true
+# pandas ships no type information, so every frame operation is Any;
+# warning on returning it would flag every function in this package
+warn_return_any = false
 no_implicit_reexport = true
 strict_equality = true
 extra_checks = true
