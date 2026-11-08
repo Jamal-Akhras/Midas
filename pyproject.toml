@@ -105,6 +105,6 @@ branch = true
 omit = ["midas/ui/*"]  # browser console: exercised by hand, not by the suite
 
 [tool.coverage.report]
-fail_under = 60
+fail_under = 65
 skip_covered = false
 show_missing = false
