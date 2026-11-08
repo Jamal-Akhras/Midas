@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from midas.config import settings
 from midas.models import (
+    SWING_BOOK,
     Instrument,
     Position,
     PositionStatus,
@@ -170,8 +171,13 @@ def enforce_loss_halt(db: Session, account_equity: float) -> str | None:
 # ---------- portfolio state ----------
 
 
-def open_positions(db: Session) -> list[Position]:
-    return list(db.scalars(select(Position).where(Position.status == PositionStatus.open)))
+def open_positions(db: Session, book: str | None = SWING_BOOK) -> list[Position]:
+    """Open positions in one book (the swing book by default: the committee's
+    caps and reviews never touch the core allocation). None = every book."""
+    stmt = select(Position).where(Position.status == PositionStatus.open)
+    if book is not None:
+        stmt = stmt.where(Position.book == book)
+    return list(db.scalars(stmt))
 
 
 def open_notional_usd(db: Session) -> float:

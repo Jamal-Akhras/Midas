@@ -122,7 +122,14 @@ def stats(db: Session) -> dict:
 
     from midas.models import Broker, Order, SystemState
 
-    outcomes = db.scalars(select(TradeOutcome)).all()
+    pos_book = {p.id: p.book for p in db.scalars(select(Position))}
+    # the core book is rules-based and measured in docs/results.md; its fills
+    # are not evidence about the committee
+    outcomes = [
+        o
+        for o in db.scalars(select(TradeOutcome))
+        if pos_book.get(o.position_id, "swing") == "swing"
+    ]
     n = len(outcomes)
     wins = [o for o in outcomes if o.pnl_usd > 0]
     total = sum(o.pnl_usd for o in outcomes)
@@ -229,8 +236,11 @@ def stats(db: Session) -> dict:
         ),
     }
 
+    from midas.pipeline.events import flag_stats
+
     return {
         "counterfactual": counterfactual,
+        "event_flags": flag_stats(db),
         "self_funding": {
             "realized_pnl_30d": round(pnl_30d, 2),
             "ai_spend_30d": round(spend_30d, 4),

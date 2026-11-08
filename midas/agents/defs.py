@@ -162,4 +162,16 @@ _DEFS: list[AgentDef[Any]] = [
     ),
 ]
 
+_DEFS.append(
+    AgentDef(
+        slug="event-analyst",
+        task_type="event_scan",
+        prompt_file="event_analyst",
+        output_schema=schemas.EventFlagsOutput,
+        artifact_type=ArtifactType.event_flags,
+        toolset="event-analyst",
+        max_tokens=2000,
+    )
+)
+
 AGENT_DEFS: dict[str, AgentDef[Any]] = {d.slug: d for d in _DEFS}

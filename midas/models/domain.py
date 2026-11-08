@@ -32,12 +32,20 @@ def _enum(e):  # store enums as short strings, portable across sqlite/postgres
     return Enum(e, native_enum=False, length=32)
 
 
+# Books: the swing committee's discretionary positions and the rules-based
+# core allocation share the account and the ladder but nothing else.
+SWING_BOOK = "swing"
+CORE_BOOK = "core"
+
+
 class RunKind(str, enum.Enum):
     screen = "screen"
     committee = "committee"
     reevaluation = "reevaluation"
     portfolio_review = "portfolio_review"
     post_mortem = "post_mortem"
+    core_rebalance = "core_rebalance"
+    event_scan = "event_scan"
 
 
 class RunStatus(str, enum.Enum):
@@ -78,6 +86,8 @@ class ArtifactType(str, enum.Enum):
     reevaluation = "reevaluation"
     portfolio_review = "portfolio_review"
     post_mortem = "post_mortem"
+    core_plan = "core_plan"
+    event_flags = "event_flags"
 
 
 class ReviewStatus(str, enum.Enum):
@@ -167,6 +177,9 @@ class TradeThesis(PKMixin, TimestampMixin, Base):
     invalidators: Mapped[list[Any]] = mapped_column(JSON, default=list)
     review_schedule: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     status: Mapped[ThesisStatus] = mapped_column(_enum(ThesisStatus), default=ThesisStatus.proposed)
+    book: Mapped[str] = mapped_column(
+        String(10), default=SWING_BOOK, server_default=SWING_BOOK, index=True
+    )
 
 
 class OptionType(str, enum.Enum):
@@ -280,6 +293,9 @@ class Position(PKMixin, TimestampMixin, Base):
     status: Mapped[PositionStatus] = mapped_column(
         _enum(PositionStatus), default=PositionStatus.open
     )
+    book: Mapped[str] = mapped_column(
+        String(10), default=SWING_BOOK, server_default=SWING_BOOK, index=True
+    )
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     realized_pnl_usd: Mapped[float] = mapped_column(Float, default=0.0)
@@ -303,6 +319,27 @@ class ScreenCandidate(PKMixin, TimestampMixin, Base):
     ticker: Mapped[str] = mapped_column(String(12), index=True)
     score: Mapped[float] = mapped_column(Float, default=0.0)
     price_at_screen: Mapped[float] = mapped_column(Float, default=0.0)
+    fwd_10d_pct: Mapped[float | None] = mapped_column(Float)
+    fwd_20d_pct: Mapped[float | None] = mapped_column(Float)
+
+
+class EventFlag(PKMixin, TimestampMixin, Base):
+    """A structured, sourced reading of one event by the event analyst.
+    Never an entry signal: a high-severity negative flag vetoes a core
+    slice, and every flag is scored against the forward return."""
+
+    __tablename__ = "event_flags"
+
+    run_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("pipeline_runs.id"), index=True)
+    artifact_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("research_artifacts.id"))
+    ticker: Mapped[str] = mapped_column(String(12), index=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    severity: Mapped[str] = mapped_column(String(10))  # low | medium | high
+    direction: Mapped[str] = mapped_column(String(10))  # negative | positive | neutral
+    summary: Mapped[str] = mapped_column(Text, default="")
+    source_url: Mapped[str] = mapped_column(Text, default="")
+    event_date: Mapped[str] = mapped_column(String(10), default="")
+    price_at_flag: Mapped[float | None] = mapped_column(Float)
     fwd_10d_pct: Mapped[float | None] = mapped_column(Float)
     fwd_20d_pct: Mapped[float | None] = mapped_column(Float)
 

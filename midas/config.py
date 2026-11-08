@@ -109,6 +109,17 @@ class Settings(BaseSettings):
     # Exits and stops always run regardless.
     regime_filter_enabled: bool = True
     regime_throttle: float = 0.5
+    # Core book (midas.strategy.core): a rules-based, trend-filtered ETF
+    # allocation in its own book, rebalanced monthly through the ladder.
+    # Off by default; the backtests in docs/results.md are the case for it.
+    core_enabled: bool = False
+    core_universe: str = "SPY,QQQ,EFA,GLD,IEF"
+    core_allocation_pct: float = 60.0  # share of equity the core book may hold
+    core_trend_window: int = 200  # days; a slice is held only above this average
+    core_veto_days: int = 30  # a high-severity negative flag vetoes a slice this long
+    # Event analyst cadence (EVENT_SCAN_WEEKDAYS=mon): scans core universe +
+    # watchlist once per listed day. Empty = manual (`midas flags scan`).
+    event_scan_weekdays: str = ""
     # Full-market deep scan: deterministic pre-filter over every tradable
     # US common stock before the LLM screener. $0 AI; ~250 API calls/day.
     deep_scan_enabled: bool = True
@@ -384,6 +395,42 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "fingerprint": True,
     },
     "REGIME_THROTTLE": {
+        "CORE_ENABLED": {
+            "attr": "core_enabled",
+            "type": "bool",
+            "group": "core",
+            "fingerprint": True,
+        },
+        "CORE_UNIVERSE": {
+            "attr": "core_universe",
+            "type": "str",
+            "group": "core",
+            "fingerprint": True,
+        },
+        "CORE_ALLOCATION_PCT": {
+            "attr": "core_allocation_pct",
+            "type": "float",
+            "group": "core",
+            "fingerprint": True,
+        },
+        "CORE_TREND_WINDOW": {
+            "attr": "core_trend_window",
+            "type": "int",
+            "group": "core",
+            "fingerprint": True,
+        },
+        "CORE_VETO_DAYS": {
+            "attr": "core_veto_days",
+            "type": "int",
+            "group": "core",
+            "fingerprint": True,
+        },
+        "EVENT_SCAN_WEEKDAYS": {
+            "attr": "event_scan_weekdays",
+            "type": "str",
+            "group": "universe",
+            "fingerprint": False,
+        },
         "attr": "regime_throttle",
         "type": "float",
         "group": "risk",

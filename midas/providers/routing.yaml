@@ -62,6 +62,10 @@ task_types:
     - gpt-4o-mini
     - claude-haiku-4-5
     - gemini-2.0-flash
+  event_scan:
+    - gpt-4o-mini
+    - claude-haiku-4-5
+    - gemini-2.0-flash
 
 # high-risk tasks may only use high-tier models, regardless of candidate order
 risk_rules:

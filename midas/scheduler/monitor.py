@@ -24,6 +24,7 @@ from midas.audit import record_event
 from midas.config import settings
 from midas.execution import executor, paper_broker
 from midas.models import (
+    SWING_BOOK,
     ActorType,
     CheckpointStatus,
     CheckpointTrigger,
@@ -85,7 +86,9 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
     a pass."""
     now = utcnow()
     due: list[tuple[Position, CheckpointTrigger, str]] = []
-    for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
+    for p in db.scalars(
+        select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
+    ):
         thesis = db.get(TradeThesis, p.thesis_id)
         recently_reviewed = p.last_reviewed_at is not None and now - aware(
             p.last_reviewed_at
@@ -740,7 +743,9 @@ def premarket_gap_sweep(db: Session) -> list[str]:
 
     flagged: list[str] = []
     now = utcnow()
-    for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
+    for p in db.scalars(
+        select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
+    ):
         ticker = p.ticker
         if p.next_review_at is not None and aware(p.next_review_at) <= now:
             continue  # already due
@@ -784,7 +789,9 @@ def ratchet_stops(db: Session) -> list[dict]:
         return changes
     for p in db.scalars(
         select(Position).where(
-            Position.status == PositionStatus.open, Position.instrument == Instrument.shares
+            Position.status == PositionStatus.open,
+            Position.instrument == Instrument.shares,
+            Position.book == SWING_BOOK,
         )
     ):
         thesis = db.get(TradeThesis, p.thesis_id)
@@ -836,7 +843,9 @@ def apply_time_stops(db: Session) -> list[str]:
         return []
     out: list[str] = []
     now = utcnow()
-    for p in db.scalars(select(Position).where(Position.status == PositionStatus.open)):
+    for p in db.scalars(
+        select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
+    ):
         days = (now - aware(p.opened_at)).days
         if days < settings.max_holding_days:
             continue
@@ -1029,6 +1038,11 @@ def _strategy_fingerprint() -> str:
             "fractional_shares",
             "regime_throttle",
             "regime_filter_enabled",
+            "core_enabled",
+            "core_universe",
+            "core_allocation_pct",
+            "core_trend_window",
+            "core_veto_days",
         )
     }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())
@@ -1206,6 +1220,13 @@ def _run_monitor_pass(
         summary["premarket_flags"] = premarket_gap_sweep(db)
         regime_ok = regime["risk_on"] or settings.regime_throttle > 0
         summary["executed"] = execute_approved_theses(db) if session_open and regime_ok else 0
+        if session_open and settings.core_enabled:
+            try:
+                from midas.strategy import core as core_book
+
+                summary["core"] = core_book.run_rebalance(db)
+            except Exception:
+                logger.exception("core rebalance failed")
         summary["stops_ratcheted"] = ratchet_stops(db)
         summary["time_stops"] = apply_time_stops(db) if session_open else []
         try:
@@ -1219,6 +1240,12 @@ def _run_monitor_pass(
         summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
     except Exception:
         logger.exception("auto-cycle failed")
+    try:
+        from midas.pipeline.events import maybe_event_scan
+
+        summary["event_scan"] = maybe_event_scan(session_factory, router)
+    except Exception:
+        logger.exception("event scan failed")
 
     for position_id, trigger, reason in due:
         try:
@@ -1249,6 +1276,9 @@ def _run_monitor_pass(
         scored_ids = [o.id for o in scored]
         try:
             summary["counterfactuals_updated"] = update_counterfactuals(db)
+            from midas.pipeline.events import update_flag_outcomes
+
+            summary["flag_outcomes_updated"] = update_flag_outcomes(db)
         except Exception:
             logger.exception("counterfactual update failed")
         db.commit()

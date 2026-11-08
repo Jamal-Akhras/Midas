@@ -293,3 +293,7 @@ def resolve_approval(
             execute_thesis(db, thesis, approved_by="operator")
     elif approval.subject_type == "order_proposal" and approve:
         execute_approved_exit(db, approval)
+    elif approval.subject_type == "core_plan" and approve:
+        from midas.strategy import core as core_book
+
+        core_book.execute_plan(db, approval.subject_id, approved_by="operator")

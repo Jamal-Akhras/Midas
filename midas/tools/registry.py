@@ -86,6 +86,7 @@ TOOLSETS: dict[str, list[str]] = {
     "catalyst": ["get_news", "get_earnings", "web_search"],
     "investor": ["get_quote", "get_daily_bars"],
     "reevaluator": ["get_quote", "get_daily_bars", "get_news", "get_earnings"],
+    "event-analyst": ["get_news", "get_filings", "get_earnings"],
 }
 
 

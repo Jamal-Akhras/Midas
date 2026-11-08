@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from midas.audit import record_event
 from midas.models import (
+    SWING_BOOK,
     ActorType,
     Broker,
     Instrument,
@@ -496,7 +497,9 @@ def sync_standing_stops(db: Session) -> dict:
         p
         for p in db.scalars(
             _select(Position).where(
-                Position.status == PositionStatus.open, Position.instrument == Instrument.shares
+                Position.status == PositionStatus.open,
+                Position.instrument == Instrument.shares,
+                Position.book == SWING_BOOK,
             )
         )
     ]

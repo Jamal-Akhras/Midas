@@ -265,3 +265,48 @@ class ReevaluationOutput(BaseModel):
         if not self.reasons:
             raise ValueError("every position decision needs explicit reasons")
         return self
+
+
+# ---------- event analyst (flags are data, never entry signals) ----------
+
+FLAG_KINDS = frozenset(
+    {
+        "guidance_cut", "guidance_raise", "accounting", "management_change", "insider_cluster",
+        "regulatory", "litigation", "dividend_change", "capital_raise", "m_and_a", "product",
+        "macro", "other",
+    }
+)  # fmt: skip
+
+
+class EventFlagItem(BaseModel):
+    kind: str
+    severity: str  # low|medium|high
+    direction: str  # negative|positive|neutral
+    summary: str
+    source_url: str
+    event_date: str = ""  # ISO date or "" if undated
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "EventFlagItem":
+        kind = self.kind.strip().lower().replace(" ", "_").replace("-", "_")
+        self.kind = kind if kind in FLAG_KINDS else "other"
+        sev = self.severity.strip().lower()
+        if sev not in ("low", "medium", "high"):
+            raise ValueError("severity must be low, medium or high")
+        self.severity = sev
+        d = self.direction.strip().lower()
+        d = {"bearish": "negative", "bullish": "positive", "mixed": "neutral"}.get(d, d)
+        if d not in ("negative", "positive", "neutral"):
+            raise ValueError("direction must be negative, positive or neutral")
+        self.direction = d
+        if not self.source_url.strip():
+            raise ValueError("every flag needs a source URL; unsourced items go in unverified")
+        if not self.summary.strip():
+            raise ValueError("a flag needs a one-sentence summary")
+        return self
+
+
+class EventFlagsOutput(BaseModel):
+    ticker: str
+    flags: list[EventFlagItem] = []
+    unverified: list[str] = []

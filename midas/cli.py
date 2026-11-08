@@ -14,6 +14,8 @@ midas halt [--clear]          show or clear the pipeline halt
 midas audit [--limit N]       recent audit trail
 midas ui [--port N]           launch the command center (local web console)
 midas research ...            backtests and docs/results.md (see midas research -h)
+midas core plan|rebalance     the rules-based core book (plan, or rebalance via the ladder)
+midas flags scan|list         event flags from the event analyst
 """
 
 import argparse
@@ -56,6 +58,15 @@ def main() -> None:
     p_ui.add_argument(
         "--host", default="127.0.0.1", help="bind address (loopback only by default; no auth)"
     )
+    p_core = sub.add_parser("core", help="rules-based core book")
+    p_core.add_argument("action", choices=["plan", "rebalance"])
+    p_core.add_argument(
+        "--force", action="store_true", help="ignore the monthly cadence and CORE_ENABLED"
+    )
+    p_flags = sub.add_parser("flags", help="event flags")
+    p_flags.add_argument("action", choices=["scan", "list"])
+    p_flags.add_argument("tickers", nargs="*")
+    p_flags.add_argument("--days", type=int, default=30)
     p_res = sub.add_parser("research", help="backtests; try: midas research -h")
     p_res.add_argument("research_args", nargs=argparse.REMAINDER)
     args = parser.parse_args()
@@ -195,6 +206,42 @@ def main() -> None:
         from midas.ui.server import serve
 
         serve(port=args.port, host=args.host)
+    elif args.cmd == "core":
+        from midas.strategy import core as core_book
+
+        with session_factory() as db:
+            if args.action == "plan":
+                print(json.dumps(core_book.build_plan(db).to_content(), indent=2, default=str))
+            else:
+                outcome = core_book.run_rebalance(db, force=args.force)
+                db.commit()
+                print(json.dumps(outcome, indent=2, default=str))
+    elif args.cmd == "flags":
+        from midas.pipeline.events import run_event_scan
+
+        if args.action == "scan":
+            from midas.strategy.core import core_universe
+
+            tickers = args.tickers or [*core_universe(), *settings.watchlist_tickers]
+            print(json.dumps(run_event_scan(session_factory, get_router(), tickers), indent=2))
+        else:
+            from datetime import timedelta as _td
+
+            from midas.models import EventFlag, aware, utcnow
+
+            with session_factory() as db:
+                since = utcnow() - _td(days=args.days)
+                rows = db.scalars(select(EventFlag).order_by(EventFlag.created_at.desc())).all()
+                for f in rows:
+                    if aware(f.created_at) < since:
+                        continue
+                    fwd = (
+                        f"fwd10 {f.fwd_10d_pct:+.1f}%" if f.fwd_10d_pct is not None else "unscored"
+                    )
+                    print(
+                        f"{f.created_at:%Y-%m-%d} {f.ticker:6s} {f.severity:6s} {f.direction:8s} "
+                        f"{f.kind:18s} {fwd:14s} {f.summary[:70]}"
+                    )
     elif args.cmd == "audit":
         from midas.models import AuditEvent
 

@@ -247,8 +247,33 @@ def _reevaluation(ticker: str) -> dict:
     }
 
 
+def _event_flags(ticker: str) -> dict:
+    """ACME carries one sourced medium flag so the scan path is exercised;
+    every other demo ticker is quiet, which is the normal answer."""
+    if ticker != "ACME":
+        return {"ticker": ticker, "flags": [], "unverified": []}
+    return {
+        "ticker": ticker,
+        "flags": [
+            {
+                "kind": "management_change",
+                "severity": "medium",
+                "direction": "negative",
+                "summary": "CFO departure announced; successor named from inside.",
+                "source_url": "https://news.example.com/demo/cfo-exit",
+                "event_date": "",
+            }
+        ],
+        "unverified": ["Rumoured activist stake - no filing found"],
+    }
+
+
 # slug -> (scripted tool calls, final output builder)
 SCRIPTS: dict[str, tuple[list[tuple[str, dict]], Callable[[str], dict]]] = {
+    "event-analyst": (
+        [("get_news", {"ticker": "TICKER"}), ("get_filings", {"ticker": "TICKER"})],
+        _event_flags,
+    ),
     "screener": (
         [
             ("get_quote", {"ticker": "ACME"}),
