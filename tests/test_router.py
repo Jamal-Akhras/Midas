@@ -31,7 +31,7 @@ def router_with(openai_script=(), anthropic_script=(), gemini_script=()):
 
 
 def test_success_logs_cost_and_call(db):
-    r = router_with(openai_script=[GOOD])
+    r = router_with(anthropic_script=[GOOD])
     out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
     events = db.scalars(select(CostEvent)).all()
@@ -39,11 +39,11 @@ def test_success_logs_cost_and_call(db):
     assert len(events) == 1 and len(calls) == 1
     assert events[0].cost_usd > 0
     assert calls[0].parse_ok is True
-    assert calls[0].router_decision["chosen"] == "gpt-4o-mini"
+    assert calls[0].router_decision["chosen"] == "claude-haiku-5-5"
 
 
 def test_failed_parse_is_logged_then_repaired(db):
-    r = router_with(openai_script=[BAD, GOOD])
+    r = router_with(anthropic_script=[BAD, GOOD])
     out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
     calls = db.scalars(select(ModelCall)).all()
@@ -53,7 +53,7 @@ def test_failed_parse_is_logged_then_repaired(db):
 
 
 def test_provider_error_falls_through(db):
-    r = router_with(openai_script=[provider_error], gemini_script=[GOOD])
+    r = router_with(anthropic_script=[provider_error], gemini_script=[GOOD])
     out = r.run(db, task_type="triage", output_schema=Out, system_prompt="s", user_prompt="u")
     assert out.answer == "yes"
 
@@ -93,7 +93,7 @@ def test_high_risk_requires_high_tier(db):
     )
     assert out.answer == "yes"
     call = db.scalars(select(ModelCall)).one()
-    assert call.router_decision["chosen"] == "claude-sonnet-4-5"
+    assert call.router_decision["chosen"] == "claude-opus-5-5"
     assert call.router_decision["rejected_by_risk"] == []  # verdict list is all-high already
 
 

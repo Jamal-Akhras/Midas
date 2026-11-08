@@ -42,11 +42,12 @@ from midas.pipeline.runner import (
     existing_artifact,
     required_artifact,
     run_agent_stage,
+    stage_provider,
     store_code_artifact,
 )
 from midas.providers.router import ModelRouter
 from midas.risk import engine as risk_engine
-from midas.risk import structurer_checks
+from midas.risk import structurer_checks, verdict_checks
 from midas.tools.base import ToolContext
 from midas.tools.registry import TOOLS
 
@@ -220,6 +221,33 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 ticker=ticker,
             )
             db.commit()
+
+    # ---- the two cases must actually have come from different providers ----
+    with session_factory() as db:
+        run = db.get_one(PipelineRun, run_id)
+        bull_provider = stage_provider(db, router, run_id, "bull")
+        bear_provider = stage_provider(db, router, run_id, "bear")
+        if (
+            settings.require_case_provider_diversity
+            and bull_provider is not None
+            and bull_provider == bear_provider
+        ):
+            record_event(
+                db,
+                event_type="committee.provider_collision",
+                summary=f"{ticker}: bull and bear both ran on '{bull_provider}' - "
+                "one model arguing with itself is not a committee; run refused",
+                run_id=run_id,
+                payload={"bull": bull_provider, "bear": bear_provider},
+            )
+            return _done(
+                db,
+                run,
+                f"refused: bull and bear both produced by '{bull_provider}' "
+                "(REQUIRE_CASE_PROVIDER_DIVERSITY)",
+                status=RunStatus.failed,
+            )
+        db.commit()
 
     # ---- options structurer: code candidates -> LLM assist -> code re-validation ----
     with session_factory() as db:
@@ -414,6 +442,54 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 "slots used." + _lessons_block
             ),
         )
+        # ---- deterministic sanity gate against the live quote ----
+        gate_ctx = ToolContext(db, run_id=run_id, ticker=ticker)
+        live = float(gate_ctx.executor(TOOLS)("get_quote", {"ticker": ticker})["data"]["price"])
+        issues = verdict_checks.problems(verdict, live)
+        if issues:
+            record_event(
+                db,
+                event_type="verdict.rejected_sanity",
+                summary=f"{ticker}: verdict levels failed the sanity gate; re-prompting once",
+                run_id=run_id,
+                subject_type="artifact",
+                subject_id=verdict_art.id,
+                payload={"problems": issues, "live_quote": live},
+            )
+            db.commit()
+            verdict_art, verdict = run_agent_stage(
+                db,
+                router,
+                run,
+                AGENT_DEFS["investor"],
+                task_text=(
+                    "Issue your structured verdict for this candidate. "
+                    "The risk_check document is binding."
+                ),
+                ticker=ticker,
+                extra_context=(
+                    "YOUR PREVIOUS VERDICT WAS REJECTED by the deterministic sanity gate: "
+                    + "; ".join(issues)
+                    + f". The live quote is ${live:.2f}. Entry zone within 15% of it, stop "
+                    "2-25% beyond the entry on the thesis side, targets beyond the entry. "
+                    "Fix the levels or rule no_trade."
+                ),
+                force_new_version=True,
+            )
+            gate_ctx.stamp_artifact(verdict_art.id)
+            issues = verdict_checks.problems(verdict, live)
+            if issues:
+                record_event(
+                    db,
+                    event_type="verdict.rejected_sanity",
+                    summary=f"{ticker}: corrected verdict still fails the sanity gate; no thesis",
+                    run_id=run_id,
+                    subject_type="artifact",
+                    subject_id=verdict_art.id,
+                    payload={"problems": issues, "live_quote": live},
+                )
+                return _done(db, run, "verdict failed the sanity gate twice: " + "; ".join(issues))
+        gate_ctx.stamp_artifact(verdict_art.id)
         risk_content = required_artifact(db, run_id, ArtifactType.risk_check).content
         structure = required_artifact(db, run_id, ArtifactType.structure).content
 

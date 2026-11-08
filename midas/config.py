@@ -147,6 +147,12 @@ class Settings(BaseSettings):
     min_price_usd: float = 5.0  # screener floor: no penny stocks
     min_avg_daily_volume: int = 1_000_000
 
+    # The two cases must come from different providers (the routing table
+    # leads them differently, but fall-through can defeat that). A run whose
+    # bull and bear landed on one provider is refused, not recorded as a
+    # two-model debate. Set false only for a single-provider setup.
+    require_case_provider_diversity: bool = True
+
     # --- AI spend ---
     daily_spend_limit_usd: float = 10.0  # hard ceiling per UTC day; <=0 disables
     per_stage_cost_ceiling_usd: float = 0.60  # max spend for one agent stage

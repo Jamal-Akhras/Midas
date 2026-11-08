@@ -18,6 +18,7 @@ from midas.models import (
     ActorType,
     ArtifactType,
     CostEvent,
+    ModelCall,
     PipelineRun,
     ResearchArtifact,
     aware,
@@ -74,6 +75,29 @@ def existing_artifact(
     )
 
 
+def stage_provider(
+    db: Session, router: ModelRouter, run_id: uuid.UUID, agent_slug: str
+) -> str | None:
+    """The routing provider that produced a stage's accepted final answer,
+    read from the router's own decision record (not from the candidate list:
+    fall-through can land a stage on a provider the list did not lead with)."""
+    call = db.scalar(
+        select(ModelCall)
+        .join(CostEvent, ModelCall.cost_event_id == CostEvent.id)
+        .where(
+            CostEvent.run_id == run_id,
+            CostEvent.agent_slug == agent_slug,
+            ModelCall.parse_ok.is_(True),
+        )
+        .order_by(ModelCall.created_at.desc())
+    )
+    if call is None:
+        return None
+    chosen = str(call.router_decision.get("chosen", ""))
+    provider = router.models.get(chosen, {}).get("provider")
+    return str(provider) if provider else None
+
+
 def required_artifact(
     db: Session, run_id: uuid.UUID, artifact_type: ArtifactType
 ) -> ResearchArtifact:
@@ -120,11 +144,14 @@ def run_agent_stage(
     task_text: str,
     ticker: str = "",
     extra_context: str = "",
+    force_new_version: bool = False,
 ) -> tuple[ResearchArtifact, T]:
     """Execute one agent stage. Skips (returns stored artifact) if this run
-    already produced this artifact type - that is the crash-resume path."""
+    already produced this artifact type - that is the crash-resume path.
+    `force_new_version` runs the stage again regardless (a deterministic
+    gate rejected the stored output and wants a corrected version)."""
     existing = existing_artifact(db, run.id, agent.artifact_type)
-    if existing is not None:
+    if existing is not None and not force_new_version:
         parsed = agent.output_schema.model_validate(existing.content)
         return existing, parsed
 
