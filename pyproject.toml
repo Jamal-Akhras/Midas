@@ -16,7 +16,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0,<10"]
+dev = [
+    "pytest>=8.0,<10",
+    "pytest-cov>=5,<8",
+    "ruff>=0.9,<1",
+    "mypy>=1.13,<3",
+    "types-PyYAML>=6,<7",
+    "pre-commit>=4,<5",
+]
 live = ["yfinance>=0.2.40,<2"]
 
 [project.urls]
@@ -37,3 +44,57 @@ midas = ["providers/routing.yaml", "agents/prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["scripts"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I isort, B bugbear, UP pyupgrade, SIM simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+ignore = [
+    "E501",  # long lines: the formatter wraps code; strings and comments are reviewed by eye
+    "B008",  # function calls in argument defaults (pydantic Field())
+    "SIM108", # ternaries are not always clearer
+    "B904",  # raise ... from inside except: applied where it adds information
+    "SIM105", # try/except/pass reads fine for best-effort side effects
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["midas"]
+
+[tool.mypy]
+python_version = "3.10"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
+exclude = ["^scripts/", "^build/"]
+
+[[tool.mypy.overrides]]
+# new code is held to the strict profile (mypy --strict, spelled out because
+# "strict" itself is not a per-module option)
+module = ["midas.research.*", "midas.strategy.*"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_untyped_calls = true
+disallow_any_generics = true
+disallow_untyped_decorators = true
+warn_return_any = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true
+
+[tool.coverage.run]
+source = ["midas"]
+branch = true
+omit = ["midas/ui/*"]  # browser console: exercised by hand, not by the suite
+
+[tool.coverage.report]
+fail_under = 60
+skip_covered = false
+show_missing = false
