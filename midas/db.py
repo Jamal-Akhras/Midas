@@ -1,20 +1,38 @@
-"""Engine/session factory. Single user, sqlite by default; set DATABASE_URL
-for Postgres. create_all is the migration story for now (personal tool);
-switch to Alembic if the schema starts churning."""
-from sqlalchemy import create_engine, event
+"""Engine/session factory and schema management. Single user, sqlite by
+default; set DATABASE_URL for Postgres.
+
+Schema changes are Alembic migrations (midas/migrations). `init_db` brings
+any database to the current revision:
+
+- empty database: create_all, then stamp head (same result, no replay)
+- pre-Alembic database (ledgers from July 2026): add the two columns that
+  were once added by hand, create tables added since, stamp head
+- versioned database: upgrade head
+"""
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from sqlalchemy import create_engine, event, inspect
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from midas.config import settings
 from midas.models import Base
 
-_engine = None
-_factory = None
+if TYPE_CHECKING:
+    from alembic.config import Config
+
+MIGRATIONS_DIR = Path(__file__).parent / "migrations"
+
+_engine: Engine | None = None
+_factory: sessionmaker[Session] | None = None
 
 
-def get_engine():
+def get_engine() -> Engine:
     global _engine
     if _engine is None:
-        kwargs = {}
+        kwargs: dict = {}
         if settings.database_url.startswith("sqlite"):
             # The UI server runs pipeline work in background threads; sqlite
             # connections must be allowed to cross thread boundaries.
@@ -32,6 +50,7 @@ def get_engine():
                 cur.execute("PRAGMA busy_timeout=30000")
                 cur.execute("PRAGMA synchronous=NORMAL")
                 cur.close()
+
     return _engine
 
 
@@ -42,18 +61,47 @@ def session_factory() -> Session:
     return _factory()
 
 
-def init_db() -> None:
-    Base.metadata.create_all(get_engine())
-    # lightweight migration: columns added after first release
-    if settings.database_url.startswith("sqlite"):
+def alembic_config() -> "Config":
+    """Programmatic Alembic config pointing at the packaged migrations and
+    the configured database (the CLI's alembic.ini resolves the same way)."""
+    from alembic.config import Config
 
-        with get_engine().connect() as conn:
-            for ddl in (
-                "ALTER TABLE orders ADD COLUMN alpaca_order_id VARCHAR(64) DEFAULT ''",
-                "ALTER TABLE orders ADD COLUMN fees_usd FLOAT DEFAULT 0.0",
-            ):
-                try:
-                    conn.exec_driver_sql(ddl)
-                    conn.commit()
-                except Exception:
-                    pass  # already present
+    cfg = Config()
+    cfg.set_main_option("script_location", str(MIGRATIONS_DIR))
+    cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+    return cfg
+
+
+# Columns added to `orders` by hand in July 2026, before migrations existed.
+# A database without alembic_version may still lack them.
+_LEGACY_ORDER_COLUMNS = {
+    "alpaca_order_id": "ALTER TABLE orders ADD COLUMN alpaca_order_id VARCHAR(64) DEFAULT ''",
+    "fees_usd": "ALTER TABLE orders ADD COLUMN fees_usd FLOAT DEFAULT 0.0",
+}
+
+
+def _adopt_legacy_schema(conn: Connection) -> None:
+    present = {c["name"] for c in inspect(conn).get_columns("orders")}
+    for name, ddl in _LEGACY_ORDER_COLUMNS.items():
+        if name not in present:
+            conn.exec_driver_sql(ddl)
+    Base.metadata.create_all(conn)  # tables added after the ledger was created
+
+
+def init_db() -> None:
+    """Bring the configured database to the current schema revision."""
+    from alembic import command
+
+    engine = get_engine()
+    tables = set(inspect(engine).get_table_names())
+    cfg = alembic_config()
+    with engine.begin() as conn:
+        cfg.attributes["connection"] = conn  # env.py reuses this connection
+        if not tables:
+            Base.metadata.create_all(conn)
+            command.stamp(cfg, "head")
+        elif "alembic_version" not in tables:
+            _adopt_legacy_schema(conn)
+            command.stamp(cfg, "head")
+        else:
+            command.upgrade(cfg, "head")

@@ -177,8 +177,6 @@ tests/             offline tests (demo mode, in-memory SQLite)
   the symbol, marked long-mid minus short-mid).
 - Roll decisions close the old position; opening the replacement leg is a
   new committee run by design (a roll is a new trade).
-- Schema migrations are `create_all` (personal tool); adopt Alembic if the
-  schema starts churning.
 
 ## Where an LLM adds value vs code (honest assessment)
 

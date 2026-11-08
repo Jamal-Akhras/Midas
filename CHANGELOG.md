@@ -9,6 +9,13 @@ not yet cut a release, so everything sits under Unreleased.
 ### Added
 - Apache-2.0 licence.
 - This changelog.
+- Quality gates: ruff (lint and format), mypy with the pydantic plugin,
+  a coverage floor, pre-commit, CodeQL and Dependabot. CI runs lint,
+  typecheck and tests on Python 3.10, 3.12 and 3.13.
+- Alembic migrations (`midas/migrations`). `midas init` stamps fresh
+  databases, adopts pre-Alembic ledgers, and upgrades versioned ones.
+- Dockerfile (non-root, sqlite ledger on a mounted volume) and a
+  `midas ui --host` flag for container use.
 
 ### Changed
 - Dependency ranges carry upper bounds on the next major version.
