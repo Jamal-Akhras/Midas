@@ -48,6 +48,12 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- Alpaca daily bars came back as the OLDEST bars in the requested window
+  (`limit=days` from a wide start, pagination ignored), so the trend filter,
+  average volume and previous close read a window that ended weeks ago at 60
+  days and months ago at 200. The tool now pages to the end, keeps the
+  newest bars, and sets `end` 16 minutes back so the free plan's
+  consolidated feed is used instead of falling back to IEX.
 - `midas monitor --loop` no longer exits when a pass raises outside the
   per-stage guards; the failure is logged and the next pass runs on time.
 - `test_news_raises_without_keys` no longer depends on whether the

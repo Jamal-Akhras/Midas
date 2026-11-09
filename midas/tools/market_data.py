@@ -121,31 +121,54 @@ def get_quote(ticker: str) -> ToolResult:
 
 
 def _alpaca_bars(ticker: str, days: int) -> list[dict]:
-    # An explicit start is required: without it Alpaca returns only TODAY'S
-    # bars, which is an empty list pre-market/overnight (avg volume would
-    # read 0 and falsely trip the liquidity floor).
-    # feed=sip gives CONSOLIDATED volume (free tier allows it for historical
-    # bars); the IEX-only feed undercounts volume ~30-50x. Fall back to iex
-    # if sip is denied.
-    from datetime import date, timedelta
+    """The newest `days` daily bars from Alpaca, oldest first.
 
-    start = (date.today() - timedelta(days=days * 2)).isoformat()
+    Alpaca serves bars oldest-first from `start` and caps each page at
+    `limit`, so `limit=days` over a wide window returns the OLDEST bars in it
+    and stops weeks before today; the first core plan of November 2026 sized
+    its trend filter on July closes that way. We page to the end and keep the
+    tail. An explicit start is still required: without it Alpaca returns only
+    today's bar, an empty list pre-market. `end` sits 16 minutes in the past
+    because the free plan serves the consolidated (sip) feed only for data
+    older than 15 minutes; iex stays as the fallback (its volume undercounts
+    30-50x).
+    """
+    from datetime import date, datetime, timedelta, timezone
+
+    start = (date.today() - timedelta(days=int(days * 1.6) + 10)).isoformat()
+    end = (datetime.now(timezone.utc) - timedelta(minutes=16)).strftime("%Y-%m-%dT%H:%M:%SZ")
     for feed in ("sip", "iex"):
-        r = httpx.get(
-            f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/bars",
-            params={
+        raw: list[dict] = []
+        page_token: str | None = None
+        denied = False
+        while True:
+            params: dict[str, Any] = {
                 "timeframe": "1Day",
-                "limit": days,
+                "limit": 10000,
                 "adjustment": "split",
                 "start": start,
+                "end": end,
                 "feed": feed,
-            },
-            headers=_alpaca_headers(),
-            timeout=15,
-        )
-        if r.status_code in (401, 403) and feed == "sip":
+            }
+            if page_token:
+                params["page_token"] = page_token
+            r = httpx.get(
+                f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/bars",
+                params=params,
+                headers=_alpaca_headers(),
+                timeout=15,
+            )
+            if r.status_code in (401, 403) and feed == "sip":
+                denied = True
+                break
+            r.raise_for_status()
+            body = r.json()
+            raw.extend(body.get("bars") or [])
+            page_token = body.get("next_page_token")
+            if not page_token:
+                break
+        if denied:
             continue
-        r.raise_for_status()
         return [
             {
                 "date": b["t"][:10],
@@ -155,7 +178,7 @@ def _alpaca_bars(ticker: str, days: int) -> list[dict]:
                 "close": b["c"],
                 "volume": b["v"],
             }
-            for b in r.json().get("bars") or []
+            for b in raw[-days:]
         ]
     return []
 
