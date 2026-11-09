@@ -75,6 +75,7 @@ midas positions     # open positions + account
 midas monitor       # one scheduler pass (re-evaluations, marks, halts, core cadence)
 midas stats         # track record vs the L3 bar, counterfactual and flag ledgers
 midas audit         # the append-only audit trail
+scripts\check.cmd   # positions + audit + stats to logs\checks\, for a scheduler (Windows)
 midas ui            # the Analyst Workstation: http://127.0.0.1:8420
 midas research report --data data/daily.pkl   # rebuild docs/results.md (after `midas research fetch`)
 pytest              # the whole suite runs offline in demo mode

@@ -7,6 +7,8 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- `scripts/check.cmd`: a read-only operator check (positions, last 30 audit
+  events, stats) written to `logs/checks/`, for a twice-daily scheduler.
 - Apache-2.0 licence, this changelog, and architecture decision records
   in `docs/adr/`.
 - Quality gates: ruff (lint and format), mypy with the pydantic plugin and

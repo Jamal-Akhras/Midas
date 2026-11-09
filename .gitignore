@@ -30,3 +30,6 @@ htmlcov/
 build/
 dist/
 .venv/
+
+# operator check reports (scripts\check.cmd) - data, not code
+logs/
