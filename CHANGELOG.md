@@ -48,6 +48,8 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- `midas monitor --loop` no longer exits when a pass raises outside the
+  per-stage guards; the failure is logged and the next pass runs on time.
 - `test_news_raises_without_keys` no longer depends on whether the
   operator's `.env` contains Alpaca keys.
 - 126 mypy findings, including `Optional` dereferences in the executor,

@@ -12,6 +12,7 @@ timer, or `midas monitor --loop`. It:
 """
 
 import logging
+import time as _time
 from collections.abc import Callable
 from datetime import timedelta
 from typing import Any
@@ -411,8 +412,6 @@ def market_session_open() -> bool | None:
     """Is the market open RIGHT NOW? Alpaca's clock is exact (holidays,
     half-days, session hours). Cached 60s; falls back to calendar-day +
     RTH-window when unreachable. None = genuinely unknown."""
-    import time as _time
-
     if _time.monotonic() - _clock_cache["at"] < 60 and _clock_cache["open"] is not None:
         return _clock_cache["open"]
     is_open = None
@@ -1157,6 +1156,36 @@ def run_monitor_once(
     finally:
         with session_factory() as db:
             release_pass_lock(db, token)
+
+
+def run_monitor_forever(
+    session_factory: Callable[[], Session],
+    router: ModelRouter,
+    interval_minutes: int,
+    *,
+    sleep: Callable[[float], None] = _time.sleep,
+    on_summary: Callable[[dict], None] | None = None,
+) -> None:
+    """`midas monitor --loop`: a pass every `interval_minutes`, until interrupted.
+
+    A pass that raises outside the per-stage guards is logged and the loop
+    carries on. A month-long paper run must not end because one network call
+    failed at the top of a pass."""
+    while True:
+        try:
+            summary = run_monitor_once(session_factory, router, interval_minutes)
+            if on_summary is not None:
+                on_summary(summary)
+        except KeyboardInterrupt:
+            logger.info("monitor loop stopped")
+            return
+        except Exception:
+            logger.exception("monitor pass failed; next attempt in %d minutes", interval_minutes)
+        try:
+            sleep(interval_minutes * 60)
+        except KeyboardInterrupt:
+            logger.info("monitor loop stopped")
+            return
 
 
 def _run_monitor_pass(

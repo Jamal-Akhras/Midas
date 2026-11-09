@@ -21,7 +21,6 @@ midas flags scan|list         event flags from the event analyst
 import argparse
 import json
 import sys
-import time
 
 from sqlalchemy import select
 
@@ -174,18 +173,17 @@ def main() -> None:
             format="%(asctime)s %(levelname)s %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )
-        from midas.scheduler.monitor import run_monitor_once
+        from midas.scheduler.monitor import run_monitor_forever, run_monitor_once
 
-        while True:
-            summary = run_monitor_once(
-                session_factory,
-                get_router(),
-                interval_minutes=args.interval_minutes if args.loop else None,
-            )
+        def show(summary: dict) -> None:
             print(json.dumps(summary, indent=2, default=str))
-            if not args.loop:
-                break
-            time.sleep(args.interval_minutes * 60)
+
+        if args.loop:
+            run_monitor_forever(
+                session_factory, get_router(), args.interval_minutes, on_summary=show
+            )
+        else:
+            show(run_monitor_once(session_factory, get_router()))
     elif args.cmd == "stats":
         from midas.outcomes.scoring import stats
 
