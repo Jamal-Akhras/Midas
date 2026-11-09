@@ -20,9 +20,26 @@ midas flags scan|list         event flags from the event analyst
 
 import argparse
 import json
+import logging
 import sys
 
 from sqlalchemy import select
+
+
+def configure_logging() -> None:
+    """Operator-facing INFO log for long-running commands.
+
+    httpx logs every request URL at INFO, and some data vendors (Finnhub,
+    FMP) carry their API key in the query string, so its chatter stays at
+    WARNING: a key must never reach a terminal, a log file or a pasted
+    snippet."""
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
 def main() -> None:
@@ -166,13 +183,7 @@ def main() -> None:
                     f"next review {p.next_review_at})"
                 )
     elif args.cmd == "monitor":
-        import logging as _logging
-
-        _logging.basicConfig(
-            level=_logging.INFO,
-            format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-            datefmt="%H:%M:%S",
-        )
+        configure_logging()
         from midas.scheduler.monitor import run_monitor_forever, run_monitor_once
 
         def show(summary: dict) -> None:

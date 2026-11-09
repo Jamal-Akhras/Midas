@@ -48,6 +48,9 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- The monitor's INFO log printed every outbound request URL, which for
+  Finnhub and FMP includes the API key in the query string. httpx logging
+  now stays at WARNING.
 - Alpaca daily bars came back as the OLDEST bars in the requested window
   (`limit=days` from a wide start, pagination ignored), so the trend filter,
   average volume and previous close read a window that ended weeks ago at 60
