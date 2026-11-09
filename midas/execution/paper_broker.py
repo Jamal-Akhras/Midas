@@ -175,7 +175,7 @@ def option_order_payload(order: Order, net_mid: float) -> dict | None:
     return {**base, "order_class": "mleg", "legs": legs}
 
 
-def _mirror_option_to_alpaca(order: Order, net_mid: float) -> tuple[float, str] | None:
+def _mirror_option_to_alpaca(order: Order, net_mid: float) -> tuple[float, str, float] | None:
     """Submit an option order (single or mleg spread) to the REAL Alpaca
     paper account. Returns (net fill price per contract, alpaca_order_id)
     or None - the caller then fails closed or simulates per config."""
@@ -215,7 +215,8 @@ def _mirror_option_to_alpaca(order: Order, net_mid: float) -> tuple[float, str] 
             ).json()
             status = o.get("status")
             if status == "filled":
-                return float(o["filled_avg_price"]), alpaca_id
+                filled_qty = float(o.get("filled_qty") or order.qty)
+                return float(o["filled_avg_price"]), alpaca_id, filled_qty
             if status in ("canceled", "rejected", "expired"):
                 logger.warning("alpaca option order %s: %s", alpaca_id, status)
                 return None
@@ -264,12 +265,15 @@ def _alpaca_headers() -> dict:
     }
 
 
-def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
+def _mirror_to_alpaca(order: Order) -> tuple[float, str, float] | None:
     """Submit an equity order to the REAL Alpaca paper account and wait
-    briefly for the fill. Returns (fill_price, alpaca_order_id) or None
-    (market closed, rejected, unreachable) - the caller then falls back to
-    the internal simulator. Paper account only; this module has no concept
-    of a real-money endpoint."""
+    briefly for the fill. Returns (fill_price, alpaca_order_id, filled_qty)
+    or None (market closed, rejected, unreachable) - the caller then falls
+    back to the internal simulator. The filled quantity comes back because
+    fractional orders go out rounded to Alpaca's three decimals, so what the
+    broker holds can differ from what the book planned; the ledger must
+    record the broker's number. Paper account only; this module has no
+    concept of a real-money endpoint."""
     import time as _time
 
     import httpx
@@ -309,7 +313,8 @@ def _mirror_to_alpaca(order: Order) -> tuple[float, str] | None:
             ).json()
             status = o.get("status")
             if status == "filled":
-                return float(o["filled_avg_price"]), alpaca_id
+                filled_qty = float(o.get("filled_qty") or order.qty)
+                return float(o["filled_avg_price"]), alpaca_id, filled_qty
             if status in ("canceled", "rejected", "expired"):
                 logger.warning("alpaca mirror order %s: %s", alpaca_id, status)
                 return None
@@ -708,8 +713,21 @@ def submit(db: Session, order: Order) -> Order:
         mirrored = _mirror_option_to_alpaca(order, option_mid)
     else:
         mirrored = _mirror_to_alpaca(order)
+    requested_qty = order.qty
     if mirrored is not None:
-        price, alpaca_id = mirrored
+        price, alpaca_id, filled_qty = mirrored
+        if abs(filled_qty - order.qty) > 1e-9:
+            # the broker's fill is the fact and the planned quantity was the
+            # intent: fractional shares go out rounded to Alpaca's three
+            # decimals, and a ledger holding the unrounded number would
+            # flag its own fill at every reconciliation
+            logger.info(
+                "%s: alpaca filled %g against planned %g; ledger adopts the broker's quantity",
+                order.symbol,
+                filled_qty,
+                order.qty,
+            )
+            order.qty = filled_qty
         if order.instrument == Instrument.option:
             fee = 0.0  # real broker fill: no synthetic friction on top
             order.fees_usd = 0.0
@@ -754,6 +772,7 @@ def submit(db: Session, order: Order) -> Order:
             "fees_usd": fee,
             "fill_source": fill_source,
             "alpaca_order_id": alpaca_id,
+            "requested_qty": requested_qty,
         },
     )
     return order

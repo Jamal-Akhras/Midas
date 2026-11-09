@@ -48,6 +48,10 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- Mirrored fills kept the planned quantity in the ledger while Alpaca
+  filled the three-decimal quantity it was sent, so every reconciliation
+  flagged the book's own fills. The ledger now records the quantity the
+  broker filled; the planned quantity stays in the fill event's payload.
 - The monitor's INFO log printed every outbound request URL, which for
   Finnhub and FMP includes the API key in the query string. httpx logging
   now stays at WARNING.
