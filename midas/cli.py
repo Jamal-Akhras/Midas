@@ -69,6 +69,20 @@ def main() -> None:
     p_halt.add_argument("--clear", action="store_true")
     p_audit = sub.add_parser("audit")
     p_audit.add_argument("--limit", type=int, default=30)
+    p_brief = sub.add_parser("brief", help="operator brief from the ledger")
+    p_brief.add_argument("--send", action="store_true", help="post it to Telegram")
+    p_brief.add_argument(
+        "--review", action="store_true", help="append a Claude review (needs the claude CLI)"
+    )
+    p_brief.add_argument(
+        "--report", help="a file the review also reads, e.g. logs/checks/latest.txt"
+    )
+    p_brief.add_argument("--since-hours", type=float, default=None)
+    p_notify = sub.add_parser("notify", help="Telegram delivery: setup | test")
+    p_notify.add_argument("action", choices=["setup", "test"])
+    p_notify.add_argument(
+        "--write", action="store_true", help="setup: save the discovered chat id to .env"
+    )
     p_ui = sub.add_parser("ui")
     p_ui.add_argument("--port", type=int, default=8420)
     p_ui.add_argument(
@@ -251,6 +265,93 @@ def main() -> None:
                         f"{f.created_at:%Y-%m-%d} {f.ticker:6s} {f.severity:6s} {f.direction:8s} "
                         f"{f.kind:18s} {fwd:14s} {f.summary[:70]}"
                     )
+    elif args.cmd == "brief":
+        configure_logging()
+        from datetime import timedelta
+        from pathlib import Path
+
+        from midas.models import utcnow
+        from midas.notify.brief import build_brief, default_since, format_brief, mark_brief_sent
+
+        reconfigure = getattr(sys.stdout, "reconfigure", None)
+        if reconfigure is not None:  # a review may carry characters the console cannot show
+            reconfigure(errors="replace")
+        if args.send and not (settings.telegram_bot_token and settings.telegram_chat_id):
+            print("Telegram is not configured; run `midas notify setup --write` first")
+            sys.exit(1)
+        with session_factory() as db:
+            now = utcnow()
+            since = (
+                now - timedelta(hours=args.since_hours)
+                if args.since_hours
+                else default_since(db, now)
+            )
+            text = format_brief(build_brief(db, since=since, now=now))
+            if args.review:
+                from midas.notify.review import claude_review
+
+                report = text
+                if args.report:
+                    report += "\n\n=== full check report ===\n" + Path(args.report).read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                verdict = claude_review(
+                    report,
+                    cli=settings.brief_review_cli,
+                    model=settings.brief_review_model,
+                    timeout_s=settings.brief_review_timeout_s,
+                )
+                text += "\n\nReview:\n" + (verdict or "unavailable (see the log)")
+            print(text)
+            if args.send:
+                from midas.notify.telegram import send_message
+
+                sent = send_message(
+                    text, token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id
+                )
+                if not sent:
+                    print("\nNOT sent (see the log)")
+                    sys.exit(1)
+                mark_brief_sent(db, now)
+                db.commit()
+                print("\nsent to Telegram")
+    elif args.cmd == "notify":
+        configure_logging()
+        from midas.notify.telegram import discover_chat, send_message
+
+        if not settings.telegram_bot_token:
+            print(
+                "TELEGRAM_BOT_TOKEN is not set. In Telegram, message @BotFather and send /newbot;\n"
+                "put the token in .env as TELEGRAM_BOT_TOKEN=...; open your new bot and send it\n"
+                "any message; then run `midas notify setup --write`."
+            )
+            sys.exit(1)
+        chat_id = settings.telegram_chat_id
+        if args.action == "setup":
+            chat = discover_chat(token=settings.telegram_bot_token)
+            if chat is None:
+                print(
+                    "No message found yet. Open your bot in Telegram, send it any message, "
+                    "then rerun `midas notify setup --write`."
+                )
+                sys.exit(1)
+            chat_id = chat["chat_id"]
+            print(f"chat id {chat_id} ({chat['name'] or 'no name'})")
+            if args.write:
+                from midas.config import update_setting
+
+                update_setting("TELEGRAM_CHAT_ID", chat_id)
+                print("saved TELEGRAM_CHAT_ID to .env")
+            elif chat_id != settings.telegram_chat_id:
+                print(f"add to .env:  TELEGRAM_CHAT_ID={chat_id}   (or rerun with --write)")
+        ok = send_message(
+            "Midas: Telegram is connected. Briefs will arrive here.",
+            token=settings.telegram_bot_token,
+            chat_id=chat_id,
+        )
+        print("test message sent" if ok else "test message FAILED (see the log)")
+        if not ok:
+            sys.exit(1)
     elif args.cmd == "audit":
         from midas.models import AuditEvent
 

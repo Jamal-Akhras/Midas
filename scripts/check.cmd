@@ -1,8 +1,9 @@
 @echo off
 rem Operator check: positions, recent audit trail and the track-record stats,
-rem written to logs\checks\<timestamp>.txt (and latest.txt). Read-only: no
-rem model calls, no orders. Meant for a scheduler (Windows Task Scheduler,
-rem twice a day) but fine by hand.
+rem written to logs\checks\<timestamp>.txt (and latest.txt), then the Telegram
+rem brief with a Claude review of that report (midas brief --send --review).
+rem Places no orders and calls no model through the router. Meant for a
+rem scheduler (Windows Task Scheduler, twice a day) but fine by hand.
 rem
 rem   scripts\check.cmd [path\to\midas.exe]
 rem
@@ -30,3 +31,8 @@ set "FILE=%OUT%\%STAMP%.txt"
 ) > "%FILE%" 2>&1
 copy /y "%FILE%" "%OUT%\latest.txt" >nul
 echo wrote %FILE%
+rem The brief exits 1 (and says so in its file) until TELEGRAM_BOT_TOKEN and
+rem TELEGRAM_CHAT_ID are set in .env; the report above is written either way.
+"%MIDAS%" brief --send --review --report "%FILE%" > "%OUT%\%STAMP%.brief.txt" 2>&1
+copy /y "%OUT%\%STAMP%.brief.txt" "%OUT%\latest.brief.txt" >nul
+echo wrote %OUT%\%STAMP%.brief.txt

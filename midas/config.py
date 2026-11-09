@@ -166,6 +166,18 @@ class Settings(BaseSettings):
     # --- scheduling ---
     reeval_hour_utc: int = 21  # daily post-close re-evaluation (US close 20/21 UTC)
     earnings_lookahead_days: int = 7  # event trigger window
+
+    # --- operator notifications (optional) ---
+    # A Telegram bot delivers `midas brief --send` (the scheduled check script
+    # calls it). The token is a secret and lives only in .env; the chat id is
+    # discovered by `midas notify setup`. The review runs Claude Code's CLI
+    # unattended with tools disabled: it needs the CLI installed and signed in
+    # on this machine, and uses the operator's plan rather than an API key.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+    brief_review_cli: str = "claude"
+    brief_review_model: str = "sonnet"
+    brief_review_timeout_s: int = 180
     dte_exit_review_threshold: int = 10  # options with fewer DTE get flagged every review
 
     # --- autopilot cadence (budget-aware) ---
@@ -470,6 +482,12 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "attr": "deep_scan_keep",
         "type": "int",
         "group": "universe",
+        "fingerprint": False,
+    },
+    "TELEGRAM_CHAT_ID": {
+        "attr": "telegram_chat_id",
+        "type": "str",
+        "group": "ops",
         "fingerprint": False,
     },
 }

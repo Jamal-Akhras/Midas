@@ -75,7 +75,8 @@ midas positions     # open positions + account
 midas monitor       # one scheduler pass (re-evaluations, marks, halts, core cadence)
 midas stats         # track record vs the L3 bar, counterfactual and flag ledgers
 midas audit         # the append-only audit trail
-scripts\check.cmd   # positions + audit + stats to logs\checks\, for a scheduler (Windows)
+scripts\check.cmd   # positions + audit + stats to logs\checks\, then the Telegram brief (Windows)
+midas brief --send --review   # the brief + a Claude review, to Telegram (see Operator notifications)
 midas ui            # the Analyst Workstation: http://127.0.0.1:8420
 midas research report --data data/daily.pkl   # rebuild docs/results.md (after `midas research fetch`)
 pytest              # the whole suite runs offline in demo mode
@@ -146,6 +147,21 @@ committee alike.
   expectancy with a bootstrap p-value, max drawdown inside the configured
   limit (`midas stats` reports progress). Changing any strategy-defining
   setting, prompt or routing restarts that clock.
+
+## Operator notifications
+
+`midas brief` turns the ledger into a short plain-text report: account and
+day change, open positions, then everything since the last brief that an
+operator should see, alerts first (a monitor heartbeat that stopped, mirror
+mismatches, rejected orders, halts), then trades and committee decisions,
+and the AI spend against the daily cap. `--send` posts it to a private
+Telegram chat. `--review` first hands the brief and the full
+`scripts\check.cmd` report to Claude Code's command line, run with every
+tool disabled, for a few lines of independent review. No model is called
+through the router and no order is placed. Setup is three steps: create a
+bot with @BotFather, send it one message, run `midas notify setup --write`.
+The scheduled check script then calls `midas brief --send --review` after
+each report.
 
 ## Risk rules (enforced in code, twice)
 

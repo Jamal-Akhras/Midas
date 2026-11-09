@@ -86,7 +86,7 @@ exclude = ["^scripts/", "^build/"]
 [[tool.mypy.overrides]]
 # new code is held to the strict profile (mypy --strict, spelled out because
 # "strict" itself is not a per-module option)
-module = ["midas.research.*", "midas.strategy.*"]
+module = ["midas.research.*", "midas.strategy.*", "midas.notify.*"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 disallow_untyped_calls = true
