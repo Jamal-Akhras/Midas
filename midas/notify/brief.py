@@ -8,8 +8,9 @@ broker's own app cannot show.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
 
 from sqlalchemy import func, select
@@ -273,3 +274,89 @@ def format_brief(brief: Brief) -> str:
     if len(text) > MAX_BRIEF_CHARS:
         text = text[: MAX_BRIEF_CHARS - 12].rstrip() + "\n(truncated)"
     return text
+
+
+def _local(moment: datetime, tz: tzinfo | None) -> str:
+    """The operator reads this on a phone: their clock, not the server's."""
+    local = moment.astimezone(tz) if tz is not None else moment.astimezone()
+    offset = local.utcoffset() or timedelta(0)
+    hours = offset.total_seconds() / 3600
+    zone = "UTC" if hours == 0 else f"UTC{hours:+g}"
+    return f"{local:%a %d %b %H:%M} {zone}"
+
+
+def _tidy(summary: str) -> str:
+    text = " ".join(summary.split())
+    return text.replace("no_trade:", "no trade.").replace("(alpaca_paper)", "at Alpaca")
+
+
+def _collapse(items: list[str]) -> list[str]:
+    """Identical lines become one line with a count: the reconcile step
+    repeats a persistent mismatch every pass."""
+    counts: dict[str, int] = {}
+    for item in items:
+        counts[item] = counts.get(item, 0) + 1
+    return [f"{item} (x{n})" if n > 1 else item for item, n in counts.items()]
+
+
+def render_telegram(brief: Brief, review: str | None = None, *, tz: tzinfo | None = None) -> str:
+    """Telegram HTML: bold headers, the review first, bullets, local time.
+    Every piece of ledger or model text is escaped; tags never span lines,
+    so the sender may split the message on line breaks."""
+    esc = html.escape
+    lines: list[str] = []
+    if brief.heartbeat_stale:
+        seen = (
+            f"last pass {_local(brief.heartbeat_at, tz)}"
+            if brief.heartbeat_at is not None
+            else "no pass recorded"
+        )
+        lines.append(
+            f"\U0001f6a8 <b>Monitor loop is not reporting</b> ({esc(seen)}). Check the PC."
+        )
+        lines.append("")
+    lines.append(f"<b>Midas</b> \u00b7 {esc(_local(brief.as_of, tz))}")
+    change = f" ({brief.day_change_pct:+.2f}% today)" if brief.day_change_pct is not None else ""
+    lines.append(
+        f"\U0001f4b0 <b>Equity ${brief.equity:,.2f}</b>{esc(change)} \u00b7 cash ${brief.cash:,.2f}"
+    )
+    if review:
+        lines += ["", "\U0001f9e0 <b>Review</b>"]
+        lines += [esc(line.strip()) for line in review.strip().splitlines() if line.strip()]
+    lines += ["", "\U0001f4c8 <b>Positions</b>"]
+    if brief.positions:
+        for p in brief.positions:
+            lines.append(
+                f"\u2022 {esc(str(p['symbol']))} {p['qty']:g} @ {p['avg_price']:.2f} "
+                f"\u2192 {p['mark']:.2f} ({p['upnl']:+.2f})"
+            )
+    else:
+        lines.append("\u2022 none")
+
+    def section(icon: str, title: str, items: list[str]) -> None:
+        lines.append("")
+        if not items:
+            lines.append(f"{icon} <b>{title}</b>: none")
+            return
+        shown = _collapse([_clip(_tidy(s)) for s in items])
+        lines.append(f"{icon} <b>{title} ({len(items)})</b>")
+        for item in shown[:ITEMS_PER_SECTION]:
+            lines.append("\u2022 " + esc(item))
+        if len(shown) > ITEMS_PER_SECTION:
+            lines.append(f"\u2022 and {len(shown) - ITEMS_PER_SECTION} more")
+
+    section("\u26a0\ufe0f", "Alerts", brief.alerts)
+    section("\U0001f501", "Trades", brief.trades)
+    section("\U0001f9ed", "Decisions", brief.decisions)
+    if brief.pending_approvals:
+        lines += [
+            "",
+            f"\u270b <b>{brief.pending_approvals} approval(s) waiting</b>: midas approvals",
+        ]
+    lines += [
+        "",
+        f"\U0001f916 AI spend ${brief.spend_since_usd:.2f} since last brief \u00b7 "
+        f"${brief.spend_today_usd:.2f} today \u00b7 cap ${brief.daily_cap_usd:.2f}",
+        f"<i>covering since {esc(_local(brief.since, tz))}</i>",
+    ]
+    return "\n".join(lines)

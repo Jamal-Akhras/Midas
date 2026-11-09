@@ -9,8 +9,10 @@ not yet cut a release, so everything sits under Unreleased.
 ### Added
 - `midas/notify`: an operator brief built from the ledger (`midas brief`),
   Telegram delivery (`--send`, `midas notify setup|test`) and an optional
-  review by Claude Code's CLI with tools disabled (`--review`). The check
-  script sends it after each report.
+  review by Claude Code's CLI with tools disabled (`--review`). The Telegram
+  rendering is HTML (bold headers, bullets, the review first, the operator's
+  local time) with a plain-text fallback. The check script sends it after
+  each report.
 - `scripts/check.cmd`: a read-only operator check (positions, last 30 audit
   events, stats) written to `logs/checks/`, for a twice-daily scheduler.
 - Apache-2.0 licence, this changelog, and architecture decision records

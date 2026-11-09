@@ -44,19 +44,30 @@ def _chunks(text: str, limit: int = MAX_MESSAGE_CHARS) -> list[str]:
     return chunks
 
 
-def send_message(text: str, *, token: str, chat_id: str, timeout: float = 15.0) -> bool:
-    """Post `text` to the chat. True only when every chunk was accepted."""
+def send_message(
+    text: str,
+    *,
+    token: str,
+    chat_id: str,
+    timeout: float = 15.0,
+    parse_mode: str | None = None,
+) -> bool:
+    """Post `text` to the chat. True only when every chunk was accepted.
+    `parse_mode="HTML"` renders Telegram's HTML subset; the caller escapes."""
     if not token or not chat_id:
         logger.warning("telegram: bot token or chat id not configured; nothing sent")
         return False
     url = f"{API_BASE}/bot{token}/sendMessage"
     for chunk in _chunks(text):
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "disable_web_page_preview": True,
+        }
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         try:
-            response = httpx.post(
-                url,
-                json={"chat_id": chat_id, "text": chunk, "disable_web_page_preview": True},
-                timeout=timeout,
-            )
+            response = httpx.post(url, json=payload, timeout=timeout)
         except Exception as exc:
             logger.warning("telegram send failed: %s", type(exc).__name__)
             return False
@@ -102,3 +113,12 @@ def _result(response: httpx.Response) -> list[dict[str, Any]]:
         return []
     result = body.get("result") if isinstance(body, dict) else None
     return [u for u in result if isinstance(u, dict)] if isinstance(result, list) else []
+
+
+def send_rich(html_text: str, plain_text: str, *, token: str, chat_id: str) -> bool:
+    """Send the HTML rendering; if Telegram refuses it (a formatting slip),
+    send the plain text instead so the operator still hears from the system."""
+    if send_message(html_text, token=token, chat_id=chat_id, parse_mode="HTML"):
+        return True
+    logger.warning("telegram: HTML message refused, sending plain text")
+    return send_message(plain_text, token=token, chat_id=chat_id)

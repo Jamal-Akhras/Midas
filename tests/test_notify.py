@@ -290,3 +290,66 @@ def test_claude_review_degrades_to_none(monkeypatch, caplog):
 def test_alert_types_cover_the_events_an_operator_must_see():
     for kind in ("execution.mismatch", "ops.alert", "pipeline.halted", "order.rejected"):
         assert kind in brief_mod.ALERT_TYPES
+
+
+def test_telegram_rendering_is_readable_html(db):
+    from datetime import datetime, timezone
+
+    now = utcnow()
+    _seed(db, now)
+    record_event(db, event_type="ops.alert", summary="a <b>tag</b> & an ampersand")
+    b = build_brief(db, since=now - timedelta(hours=12), now=now)
+    b.as_of = datetime(2026, 11, 9, 17, 52, tzinfo=timezone.utc)
+    html_text = brief_mod.render_telegram(
+        b, "Nothing looks off.\nWatch the open.", tz=timezone(timedelta(hours=4))
+    )
+    lines = html_text.splitlines()
+
+    assert lines[0] == "<b>Midas</b> \u00b7 Mon 09 Nov 21:52 UTC+4"  # the operator's clock
+    assert lines.index("\U0001f9e0 <b>Review</b>") < lines.index("\U0001f4c8 <b>Positions</b>")
+    assert "Nothing looks off." in lines and "Watch the open." in lines
+    assert "\u2022 SPY 0.161 @ 744.05 \u2192 752.51 (+1.36)" in lines
+    assert "a &lt;b&gt;tag&lt;/b&gt; &amp; an ampersand" in html_text  # ledger text is escaped
+    assert "TSLA: no trade. bearish case won" in html_text
+    assert all(line.count("<b>") == line.count("</b>") for line in lines)  # tags never span lines
+
+
+def test_telegram_rendering_collapses_repeated_alerts_and_warns_first(db):
+    now = utcnow()
+    _seed(db, now, heartbeat_minutes_ago=120, next_pass_in_minutes=-100)
+    record_event(db, event_type="execution.mismatch", summary="MIRROR MISMATCH EFA: 1 vs 2")
+    b = build_brief(db, since=now - timedelta(hours=12), now=now)
+    html_text = brief_mod.render_telegram(b, None)
+    assert html_text.startswith("\U0001f6a8 <b>Monitor loop is not reporting</b>")
+    assert "MIRROR MISMATCH EFA: 1 vs 2 (x2)" in html_text
+    assert "<b>Alerts (3)</b>" in html_text  # the count is of events, the lines are collapsed
+    assert "<b>Review</b>" not in html_text  # no review, no empty section
+
+
+def test_send_message_passes_parse_mode_only_when_asked(monkeypatch):
+    payloads: list[dict] = []
+
+    def fake_post(url, *, json=None, timeout=None):
+        payloads.append(json)
+        return httpx.Response(200, json={"ok": True}, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    telegram.send_message("a", token="t", chat_id="c")
+    telegram.send_message("<b>a</b>", token="t", chat_id="c", parse_mode="HTML")
+    assert "parse_mode" not in payloads[0] and payloads[1]["parse_mode"] == "HTML"
+
+
+def test_send_rich_falls_back_to_plain_text(monkeypatch):
+    payloads: list[dict] = []
+
+    def fake_post(url, *, json=None, timeout=None):
+        payloads.append(json)
+        status = 400 if json.get("parse_mode") else 200
+        return httpx.Response(
+            status, json={"ok": status == 200}, request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert telegram.send_rich("<b>bad<i>", "plain words", token="t", chat_id="c")
+    assert [p["text"] for p in payloads] == ["<b>bad<i>", "plain words"]
+    assert "parse_mode" not in payloads[1]

@@ -271,7 +271,13 @@ def main() -> None:
         from pathlib import Path
 
         from midas.models import utcnow
-        from midas.notify.brief import build_brief, default_since, format_brief, mark_brief_sent
+        from midas.notify.brief import (
+            build_brief,
+            default_since,
+            format_brief,
+            mark_brief_sent,
+            render_telegram,
+        )
 
         reconfigure = getattr(sys.stdout, "reconfigure", None)
         if reconfigure is not None:  # a review may carry characters the console cannot show
@@ -286,7 +292,9 @@ def main() -> None:
                 if args.since_hours
                 else default_since(db, now)
             )
-            text = format_brief(build_brief(db, since=since, now=now))
+            brief = build_brief(db, since=since, now=now)
+            text = format_brief(brief)
+            review: str | None = None
             if args.review:
                 from midas.notify.review import claude_review
 
@@ -295,19 +303,25 @@ def main() -> None:
                     report += "\n\n=== full check report ===\n" + Path(args.report).read_text(
                         encoding="utf-8", errors="replace"
                     )
-                verdict = claude_review(
-                    report,
-                    cli=settings.brief_review_cli,
-                    model=settings.brief_review_model,
-                    timeout_s=settings.brief_review_timeout_s,
+                review = (
+                    claude_review(
+                        report,
+                        cli=settings.brief_review_cli,
+                        model=settings.brief_review_model,
+                        timeout_s=settings.brief_review_timeout_s,
+                    )
+                    or "Review unavailable: see the check log on the PC."
                 )
-                text += "\n\nReview:\n" + (verdict or "unavailable (see the log)")
+                text += "\n\nReview:\n" + review
             print(text)
             if args.send:
-                from midas.notify.telegram import send_message
+                from midas.notify.telegram import send_rich
 
-                sent = send_message(
-                    text, token=settings.telegram_bot_token, chat_id=settings.telegram_chat_id
+                sent = send_rich(
+                    render_telegram(brief, review),
+                    text,
+                    token=settings.telegram_bot_token,
+                    chat_id=settings.telegram_chat_id,
                 )
                 if not sent:
                     print("\nNOT sent (see the log)")
