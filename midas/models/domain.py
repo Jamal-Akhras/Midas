@@ -74,6 +74,7 @@ class PipelineRun(PKMixin, TimestampMixin, Base):
 
 class ArtifactType(str, enum.Enum):
     screen_results = "screen_results"
+    screen_context = "screen_context"  # per-run: today's screen record + code technical block
     fundamentals = "fundamentals"
     dossier = "dossier"
     catalysts = "catalysts"

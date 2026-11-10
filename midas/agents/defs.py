@@ -85,16 +85,25 @@ _DEFS: list[AgentDef[Any]] = [
         prompt_file="triage",
         output_schema=schemas.TriageOutput,
         artifact_type=ArtifactType.triage,
-        reads=[ArtifactType.fundamentals, ArtifactType.catalysts],
+        reads=[ArtifactType.screen_context, ArtifactType.fundamentals, ArtifactType.catalysts],
         max_tokens=1500,
     ),
+    # Bull, bear and the investor read the screen context first: the setup
+    # the ticker was selected for and a code-built technical block. Judging a
+    # 3-week pullback trade on long-run valuation alone refused 4/4 candidates
+    # in the first two days of the November 2026 paper run.
     AgentDef(
         slug="bull",
         task_type="bull_case",
         prompt_file="bull",
         output_schema=schemas.DirectionalCase,
         artifact_type=ArtifactType.bull_case,
-        reads=[ArtifactType.fundamentals, ArtifactType.dossier, ArtifactType.catalysts],
+        reads=[
+            ArtifactType.screen_context,
+            ArtifactType.fundamentals,
+            ArtifactType.dossier,
+            ArtifactType.catalysts,
+        ],
     ),
     AgentDef(
         slug="bear",
@@ -102,7 +111,12 @@ _DEFS: list[AgentDef[Any]] = [
         prompt_file="bear",
         output_schema=schemas.DirectionalCase,
         artifact_type=ArtifactType.bear_case,
-        reads=[ArtifactType.fundamentals, ArtifactType.dossier, ArtifactType.catalysts],
+        reads=[
+            ArtifactType.screen_context,
+            ArtifactType.fundamentals,
+            ArtifactType.dossier,
+            ArtifactType.catalysts,
+        ],
     ),
     AgentDef(
         slug="structurer",
@@ -122,6 +136,7 @@ _DEFS: list[AgentDef[Any]] = [
         toolset="investor",
         risk_level="high",
         reads=[
+            ArtifactType.screen_context,
             ArtifactType.fundamentals,
             ArtifactType.dossier,
             ArtifactType.catalysts,

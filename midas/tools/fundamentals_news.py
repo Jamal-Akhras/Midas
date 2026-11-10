@@ -5,6 +5,7 @@ are wired; Finnhub is tried first). Demo fixtures otherwise.
 """
 
 import logging
+from datetime import date, timedelta
 
 import httpx
 
@@ -13,6 +14,48 @@ from midas.tools import demo_data
 from midas.tools.base import ToolError, ToolResult
 
 logger = logging.getLogger(__name__)
+
+FINNHUB_BASE = "https://finnhub.io/api/v1"
+EARNINGS_CALENDAR_LOOKAHEAD_DAYS = 120
+
+# Every ratio below is TRAILING. The committee once read peTTM labelled
+# "pe_forward" as a forward multiple and refused mega-caps on it; the label
+# is the fact, so forward estimates are declared absent rather than implied.
+FORWARD_ESTIMATES_UNAVAILABLE = {
+    "available": False,
+    "note": (
+        "no forward-estimate endpoint is wired; every ratio in this result is trailing "
+        "(TTM). Do not relabel trailing data as forward or projected."
+    ),
+}
+
+
+def _finnhub_next_earnings_date(ticker: str, key: dict, today: date | None = None) -> str:
+    """First scheduled report on/after today, or "". Queried WITHOUT a window,
+    Finnhub's calendar answers with the most recent PAST report, which the
+    committee then planned around (every run on 2026-11-09/10)."""
+    today = today or date.today()
+    cal = httpx.get(
+        f"{FINNHUB_BASE}/calendar/earnings",
+        params={
+            "symbol": ticker,
+            "from": today.isoformat(),
+            "to": (today + timedelta(days=EARNINGS_CALENDAR_LOOKAHEAD_DAYS)).isoformat(),
+            **key,
+        },
+        timeout=15,
+    )
+    if cal.status_code != 200:
+        return ""
+    ahead: list[date] = []
+    for event in cal.json().get("earningsCalendar") or []:
+        try:
+            when = date.fromisoformat(str(event.get("date") or "")[:10])
+        except ValueError:
+            continue
+        if when >= today:
+            ahead.append(when)
+    return min(ahead).isoformat() if ahead else ""
 
 
 def get_earnings(ticker: str) -> ToolResult:
@@ -41,9 +84,10 @@ def get_earnings(ticker: str) -> ToolResult:
 
 
 def _finnhub_earnings(ticker: str) -> dict:
-    base = "https://finnhub.io/api/v1"
     key = {"token": settings.finnhub_api_key}
-    surprises = httpx.get(f"{base}/stock/earnings", params={"symbol": ticker, **key}, timeout=15)
+    surprises = httpx.get(
+        f"{FINNHUB_BASE}/stock/earnings", params={"symbol": ticker, **key}, timeout=15
+    )
     surprises.raise_for_status()
     quarters = [
         {
@@ -55,27 +99,24 @@ def _finnhub_earnings(ticker: str) -> dict:
         for s in surprises.json()[:8]
     ]
     metrics = httpx.get(
-        f"{base}/stock/metric", params={"symbol": ticker, "metric": "all", **key}, timeout=15
+        f"{FINNHUB_BASE}/stock/metric",
+        params={"symbol": ticker, "metric": "all", **key},
+        timeout=15,
     )
     metrics.raise_for_status()
     m = metrics.json().get("metric", {})
-    cal = httpx.get(f"{base}/calendar/earnings", params={"symbol": ticker, **key}, timeout=15)
-    next_date = ""
-    if cal.status_code == 200:
-        events = cal.json().get("earningsCalendar") or []
-        if events:
-            next_date = events[0].get("date", "")
     return {
         "ticker": ticker,
         "quarters": quarters,
-        "next_earnings_date": next_date,
-        "estimates": {"eps_next_q": None, "revenue_growth_pct": m.get("revenueGrowthTTMYoy")},
+        "next_earnings_date": _finnhub_next_earnings_date(ticker, key),
+        "revenue_growth_ttm_yoy_pct": m.get("revenueGrowthTTMYoy"),
         "ratios": {
-            "pe_forward": m.get("peTTM"),
-            "ps": m.get("psTTM"),
+            "pe_ttm": m.get("peTTM"),
+            "ps_ttm": m.get("psTTM"),
             "debt_to_equity": m.get("totalDebt/totalEquityQuarterly"),
-            "fcf_margin_pct": m.get("fcfMarginTTM"),
+            "fcf_margin_ttm_pct": m.get("fcfMarginTTM"),
         },
+        "forward_estimates": dict(FORWARD_ESTIMATES_UNAVAILABLE),
     }
 
 
@@ -100,13 +141,14 @@ def _fmp_earnings(ticker: str) -> dict:
         "ticker": ticker,
         "quarters": quarters,
         "next_earnings_date": "",
-        "estimates": {"eps_next_q": None, "revenue_growth_pct": None},
+        "revenue_growth_ttm_yoy_pct": None,
         "ratios": {
-            "pe_forward": r.get("peRatioTTM"),
-            "ps": r.get("priceToSalesRatioTTM"),
+            "pe_ttm": r.get("peRatioTTM"),
+            "ps_ttm": r.get("priceToSalesRatioTTM"),
             "debt_to_equity": r.get("debtEquityRatioTTM"),
-            "fcf_margin_pct": None,
+            "fcf_margin_ttm_pct": None,
         },
+        "forward_estimates": dict(FORWARD_ESTIMATES_UNAVAILABLE),
     }
 
 

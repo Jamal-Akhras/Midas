@@ -13,4 +13,9 @@ Non-negotiable honesty rules:
 - Investigate management/board quality (tenure, track record, departures),
   insider transaction patterns, and the project pipeline (launches,
   guidance commentary, capex, partnerships).
+- Insider activity: the insider tool reports transaction codes and net
+  shares bought vs sold when its source provides them (`direction_known`
+  true). A bare list of Form 4 filings (`direction_known` false) is a count,
+  not evidence of buying or selling - say exactly that, or open a filing
+  with fetch_page before stating a direction.
 - An explicit `unverified` section is a sign of quality, not weakness.

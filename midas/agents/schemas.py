@@ -5,7 +5,30 @@ Honest-data rule, schema-enforced where possible: research claims carry
 sources; anything without a source belongs in `unverified`.
 """
 
+from datetime import date
+
 from pydantic import BaseModel, Field, model_validator
+
+
+def _future_or_empty(value: str, label: str) -> tuple[str, str]:
+    """An ISO date on/after today passes through; a past date is the LAST
+    report, not the next (Finnhub's calendar answered that way for every
+    run on 2026-11-09/10 and the committee planned around it); anything
+    unparseable is not a fact. Returns (normalised value, unverified note)."""
+    raw = (value or "").strip()
+    if not raw:
+        return "", ""
+    try:
+        d = date.fromisoformat(raw[:10])
+    except ValueError:
+        return "", f"{label} '{raw}' is not an ISO date; next date unknown"
+    if d < date.today():
+        return (
+            "",
+            f"{label} {raw} is in the past (the last report, not the next); next date unknown",
+        )
+    return d.isoformat(), ""
+
 
 # ---------- screener ----------
 
@@ -39,12 +62,21 @@ class EarningsQuarter(BaseModel):
 class FundamentalsOutput(BaseModel):
     ticker: str
     recent_quarters: list[EarningsQuarter]
-    next_earnings_date: str = ""  # ISO date or "" if unknown
-    projected_eps_next_q: float | None = None
-    projected_revenue_growth_pct: float | None = None
-    key_ratios: dict[str, float] = {}
+    next_earnings_date: str = ""  # ISO date on/after today, or "" if unknown
+    projected_eps_next_q: float | None = None  # consensus from a FORWARD endpoint only; else None
+    revenue_growth_ttm_yoy_pct: float | None = None  # trailing twelve months - not a projection
+    key_ratios: dict[str, float] = {}  # named exactly as the tool labels them (pe_ttm, ps_ttm, ...)
     guidance_history: str = ""
     unverified: list[str] = []  # anything a tool call could not confirm
+
+    @model_validator(mode="after")
+    def _earnings_date_is_ahead(self) -> "FundamentalsOutput":
+        self.next_earnings_date, note = _future_or_empty(
+            self.next_earnings_date, "next_earnings_date"
+        )
+        if note:
+            self.unverified.append(note)
+        return self
 
 
 # ---------- deep research ----------
@@ -94,10 +126,38 @@ class Catalyst(BaseModel):
 
 class CatalystOutput(BaseModel):
     ticker: str
-    upcoming_earnings_date: str = ""
+    upcoming_earnings_date: str = ""  # ISO date on/after today, or ""
     catalysts: list[Catalyst]
     sector_context: str = ""
     unverified: list[str] = []
+
+    @model_validator(mode="after")
+    def _earnings_dates_are_ahead(self) -> "CatalystOutput":
+        self.upcoming_earnings_date, note = _future_or_empty(
+            self.upcoming_earnings_date, "upcoming_earnings_date"
+        )
+        if note:
+            self.unverified.append(note)
+        # A past-dated EARNINGS catalyst is a report that already happened
+        # (triage passed GOOGL on "upcoming earnings 2026-10-28" on 11-10).
+        # Other past-dated items are recent news and stay.
+        today = date.today()
+        kept: list[Catalyst] = []
+        for c in self.catalysts:
+            if "earnings" in c.event.lower() and c.date.strip():
+                try:
+                    when: date | None = date.fromisoformat(c.date.strip()[:10])
+                except ValueError:
+                    when = None
+                if when is not None and when < today:
+                    self.unverified.append(
+                        f"catalyst '{c.event}' dated {c.date} is in the past (already "
+                        "reported, not upcoming); dropped"
+                    )
+                    continue
+            kept.append(c)
+        self.catalysts = kept
+        return self
 
 
 # ---------- passable gate (cheap-model triage) ----------
@@ -170,6 +230,10 @@ class VerdictOutput(BaseModel):
         # the router's repair attempt fixes it.
         dir_map = {"long": "bullish", "short": "bearish", "bull": "bullish", "bear": "bearish"}
         inst_map = {"options": "option", "stock": "shares", "equity": "shares", "share": "shares"}
+        # "No Trade" / "TRADE" are the same verdict: normalise before judging
+        # so the router's repair call is not spent on capitalisation.
+        v = self.verdict.strip().lower().replace("-", "_").replace(" ", "_")
+        self.verdict = {"notrade": "no_trade"}.get(v, v)
         if self.direction:
             d = self.direction.strip().lower()
             self.direction = dir_map.get(d, d)
@@ -199,6 +263,12 @@ class VerdictOutput(BaseModel):
         elif self.verdict == "no_trade":
             if not self.no_trade_reason:
                 raise ValueError("a 'no_trade' verdict must state why")
+            if self.entry_zone_low or self.entry_zone_high:
+                # AAPL 2026-11-10: no_trade with entry 340-345 at spot 349.65
+                # was discarded; the executor would have rested that limit.
+                raise ValueError(
+                    "a wait-for-pullback is a trade verdict: answer trade with the zone and a stop"
+                )
         else:
             raise ValueError("verdict must be 'trade' or 'no_trade'")
         return self

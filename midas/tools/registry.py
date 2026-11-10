@@ -43,7 +43,12 @@ TOOLS: dict[str, Tool] = {
     ),
     "get_insider_transactions": Tool(
         name="get_insider_transactions",
-        description="Recent Form 4 insider transactions with URLs from EDGAR.",
+        description=(
+            "Insider transactions over the last 90 days WITH direction when the source "
+            "provides it (direction_known=true: net shares bought vs sold, counts by "
+            "transaction code P/S/A/M/F/G); otherwise an EDGAR Form 4 filing list that "
+            "carries no direction (direction_known=false)."
+        ),
         parameters=params({"ticker": {"type": "string"}}, ["ticker"]),
         fn=edgar.get_insider_transactions,
     ),
