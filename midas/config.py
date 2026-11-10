@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///midas.db"
 
     # --- model providers (any one enables real AI; none => demo mode) ---
-    openai_api_key: str = ""
-    anthropic_api_key: str = ""
-    gemini_api_key: str = ""
+    openai_api_key: str = Field("", repr=False)
+    anthropic_api_key: str = Field("", repr=False)
+    gemini_api_key: str = Field("", repr=False)
     # Base URLs: the vendors by default. Point them at an LLM gateway (see
     # docs/tollgate.md) to put budgets and a tamper-evident audit trail in
     # front of every call; the matching *_API_KEY then holds the gateway's
@@ -58,10 +58,10 @@ class Settings(BaseSettings):
     # Mirror equity paper orders to the real Alpaca paper account (real
     # fills feed the ledger; the Alpaca dashboard becomes an external audit).
     alpaca_mirror_orders: bool = True
-    finnhub_api_key: str = ""
-    fmp_api_key: str = ""
-    brave_api_key: str = ""
-    tavily_api_key: str = ""
+    finnhub_api_key: str = Field("", repr=False)
+    fmp_api_key: str = Field("", repr=False)
+    brave_api_key: str = Field("", repr=False)
+    tavily_api_key: str = Field("", repr=False)
 
     # --- autonomy ladder (see module docstring) ---
     # 0 = committee recommends, operator approves everything
@@ -173,7 +173,7 @@ class Settings(BaseSettings):
     # discovered by `midas notify setup`. The review runs Claude Code's CLI
     # unattended with tools disabled: it needs the CLI installed and signed in
     # on this machine, and uses the operator's plan rather than an API key.
-    telegram_bot_token: str = ""
+    telegram_bot_token: str = Field("", repr=False)
     telegram_chat_id: str = ""
     brief_review_cli: str = "claude"
     brief_review_model: str = "sonnet"
