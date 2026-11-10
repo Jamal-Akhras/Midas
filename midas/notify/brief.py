@@ -9,6 +9,7 @@ broker's own app cannot show.
 from __future__ import annotations
 
 import html
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any
@@ -299,10 +300,109 @@ def _collapse(items: list[str]) -> list[str]:
     return [f"{item} (x{n})" if n > 1 else item for item, n in counts.items()]
 
 
-def render_telegram(brief: Brief, review: str | None = None, *, tz: tzinfo | None = None) -> str:
+ATTENTION_SPEND_FRACTION = 0.8  # of the daily cap: worth a line even in a quiet hour
+COMPACT_ITEMS_PER_SECTION = 3
+COMPACT_SPEND_FRACTION = 0.5
+
+
+def needs_attention(brief: Brief) -> bool:
+    """Whether an hourly brief has anything a reviewer should look at: a
+    silent monitor, alerts, trades, decisions, approvals, or spend near the
+    cap. A quiet hour is reported without spending a review on it."""
+    near_cap = (
+        brief.daily_cap_usd > 0
+        and brief.spend_today_usd >= ATTENTION_SPEND_FRACTION * brief.daily_cap_usd
+    )
+    return bool(
+        brief.heartbeat_stale
+        or brief.alerts
+        or brief.trades
+        or brief.decisions
+        or brief.pending_approvals
+        or near_cap
+    )
+
+
+def plain_from_html(html_text: str) -> str:
+    """The plain-text twin of a rendered message, for the fallback send."""
+    return html.unescape(re.sub(r"<[^>]+>", "", html_text))
+
+
+def _stale_line(brief: Brief, tz: tzinfo | None) -> str:
+    seen = (
+        f"last pass {_local(brief.heartbeat_at, tz)}"
+        if brief.heartbeat_at is not None
+        else "no pass recorded"
+    )
+    return f"\U0001f6a8 <b>Monitor loop is not reporting</b> ({html.escape(seen)}). Check the PC."
+
+
+def render_compact(brief: Brief, review: str | None = None, *, tz: tzinfo | None = None) -> str:
+    """The hourly form: one status line, positions on one line, and only
+    the sections that have something in them. A quiet hour is a few lines."""
+    esc = html.escape
+    lines: list[str] = []
+    if brief.heartbeat_stale:
+        lines += [_stale_line(brief, tz), ""]
+    change = f" ({brief.day_change_pct:+.2f}%)" if brief.day_change_pct is not None else ""
+    lines.append(
+        f"<b>Midas</b> \u00b7 {esc(_local(brief.as_of, tz))} \u00b7 "
+        f"<b>${brief.equity:,.2f}</b>{esc(change)} \u00b7 cash ${brief.cash:,.2f}"
+    )
+    if brief.positions:
+        marks = " \u00b7 ".join(
+            f"{esc(str(p['symbol']))} {p['upnl']:+.2f}" for p in brief.positions
+        )
+        lines.append(f"\U0001f4c8 {marks}")
+    else:
+        lines.append("\U0001f4c8 no positions")
+    if review:
+        lines += [esc(line.strip()) for line in review.strip().splitlines() if line.strip()]
+
+    def section(icon: str, title: str, items: list[str]) -> None:
+        if not items:
+            return
+        shown = _collapse([_clip(_tidy(s)) for s in items])
+        lines.append(f"{icon} <b>{title} ({len(items)})</b>")
+        for item in shown[:COMPACT_ITEMS_PER_SECTION]:
+            lines.append("\u2022 " + esc(item))
+        if len(shown) > COMPACT_ITEMS_PER_SECTION:
+            lines.append(f"\u2022 and {len(shown) - COMPACT_ITEMS_PER_SECTION} more")
+
+    section("\u26a0\ufe0f", "Alerts", brief.alerts)
+    section("\U0001f501", "Trades", brief.trades)
+    section("\U0001f9ed", "Decisions", brief.decisions)
+    if brief.pending_approvals:
+        lines.append(
+            f"\u270b <b>{brief.pending_approvals} approval(s) waiting</b>: midas approvals"
+        )
+    near_cap = (
+        brief.daily_cap_usd > 0
+        and brief.spend_today_usd >= COMPACT_SPEND_FRACTION * brief.daily_cap_usd
+    )
+    if near_cap:
+        lines.append(
+            f"\U0001f916 AI spend ${brief.spend_today_usd:.2f} today \u00b7 "
+            f"cap ${brief.daily_cap_usd:.2f}"
+        )
+    if not (brief.alerts or brief.trades or brief.decisions or brief.pending_approvals):
+        lines.append(f"<i>quiet since {esc(_local(brief.since, tz))}</i>")
+    return "\n".join(lines)
+
+
+def render_telegram(
+    brief: Brief,
+    review: str | None = None,
+    *,
+    tz: tzinfo | None = None,
+    compact: bool = False,
+) -> str:
     """Telegram HTML: bold headers, the review first, bullets, local time.
     Every piece of ledger or model text is escaped; tags never span lines,
-    so the sender may split the message on line breaks."""
+    so the sender may split the message on line breaks. `compact` is the
+    hourly form (see render_compact)."""
+    if compact:
+        return render_compact(brief, review, tz=tz)
     esc = html.escape
     lines: list[str] = []
     if brief.heartbeat_stale:

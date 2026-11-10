@@ -162,6 +162,10 @@ through the router and no order is placed. Setup is three steps: create a
 bot with @BotFather, send it one message, run `midas notify setup --write`.
 The scheduled check script then calls `midas brief --send --review` after
 each report.
+`--compact` is the hourly form used during the session: a status line,
+positions on one line, only the sections with content, and the review
+only when something needs attention. The scheduler sends full briefs at
+09:00 and 19:05 local and compact ones hourly until the close.
 
 ## Risk rules (enforced in code, twice)
 

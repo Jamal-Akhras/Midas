@@ -78,6 +78,11 @@ def main() -> None:
         "--report", help="a file the review also reads, e.g. logs/checks/latest.txt"
     )
     p_brief.add_argument("--since-hours", type=float, default=None)
+    p_brief.add_argument(
+        "--compact",
+        action="store_true",
+        help="the hourly form: a few lines, and a review only when something happened",
+    )
     p_notify = sub.add_parser("notify", help="Telegram delivery: setup | test")
     p_notify.add_argument("action", choices=["setup", "test"])
     p_notify.add_argument(
@@ -276,6 +281,8 @@ def main() -> None:
             default_since,
             format_brief,
             mark_brief_sent,
+            needs_attention,
+            plain_from_html,
             render_telegram,
         )
 
@@ -295,7 +302,7 @@ def main() -> None:
             brief = build_brief(db, since=since, now=now)
             text = format_brief(brief)
             review: str | None = None
-            if args.review:
+            if args.review and (not args.compact or needs_attention(brief)):
                 from midas.notify.review import claude_review
 
                 report = text
@@ -309,6 +316,7 @@ def main() -> None:
                         cli=settings.brief_review_cli,
                         model=settings.brief_review_model,
                         timeout_s=settings.brief_review_timeout_s,
+                        compact=args.compact,
                     )
                     or "Review unavailable: see the check log on the PC."
                 )
@@ -317,9 +325,10 @@ def main() -> None:
             if args.send:
                 from midas.notify.telegram import send_rich
 
+                html_text = render_telegram(brief, review, compact=args.compact)
                 sent = send_rich(
-                    render_telegram(brief, review),
-                    text,
+                    html_text,
+                    plain_from_html(html_text) if args.compact else text,
                     token=settings.telegram_bot_token,
                     chat_id=settings.telegram_chat_id,
                 )

@@ -353,3 +353,75 @@ def test_send_rich_falls_back_to_plain_text(monkeypatch):
     assert telegram.send_rich("<b>bad<i>", "plain words", token="t", chat_id="c")
     assert [p["text"] for p in payloads] == ["<b>bad<i>", "plain words"]
     assert "parse_mode" not in payloads[1]
+
+
+def test_compact_rendering_of_a_quiet_hour_is_a_few_lines(db):
+    from datetime import datetime, timezone
+
+    now = utcnow()
+    _seed(db, now)
+    b = build_brief(db, since=now - timedelta(hours=1), now=now)
+    b.alerts, b.trades, b.decisions, b.pending_approvals = [], [], [], 0
+    b.as_of = datetime(2026, 11, 11, 16, 5, tzinfo=timezone.utc)
+    html_text = brief_mod.render_telegram(b, None, tz=timezone(timedelta(hours=4)), compact=True)
+    lines = html_text.splitlines()
+
+    assert lines[0].startswith("<b>Midas</b> \u00b7 Wed 11 Nov 20:05 UTC+4 \u00b7 <b>$")
+    assert lines[1].startswith("\U0001f4c8 ") and "SPY +1.36" in lines[1]  # one line of marks
+    assert lines[-1].startswith("<i>quiet since ")
+    assert "<b>Alerts" not in html_text and "<b>Positions</b>" not in html_text
+    assert "AI spend" not in html_text  # far from the cap: not worth a line
+    assert len(lines) == 3 and len(html_text) < 300
+    assert not brief_mod.needs_attention(b)
+    plain = brief_mod.plain_from_html(html_text)
+    assert "<" not in plain and "Midas \u00b7 Wed 11 Nov 20:05 UTC+4" in plain
+
+
+def test_compact_rendering_shows_only_the_sections_with_content(db):
+    now = utcnow()
+    _seed(db, now)
+    for i in range(5):
+        record_event(db, event_type="order.rejected", summary=f"reject {i} & co")
+    b = build_brief(db, since=now - timedelta(hours=1), now=now)
+    assert brief_mod.needs_attention(b)
+    html_text = brief_mod.render_telegram(b, "Nothing looks off.", compact=True)
+    n = len(b.alerts)  # the seed adds alerts of its own
+    assert f"<b>Alerts ({n})</b>" in html_text and "reject 0 &amp; co" in html_text
+    assert f"• and {n - 3} more" in html_text  # three items shown in the compact form
+    assert "Nothing looks off." in html_text
+    assert "quiet since" not in html_text
+    assert "<b>Review</b>" not in html_text  # no header in the compact form
+
+
+def test_compact_rendering_still_warns_first_when_the_monitor_is_silent(db):
+    now = utcnow()
+    _seed(db, now, heartbeat_minutes_ago=120, next_pass_in_minutes=-100)
+    b = build_brief(db, since=now - timedelta(hours=1), now=now)
+    assert brief_mod.needs_attention(b)
+    html_text = brief_mod.render_telegram(b, None, compact=True)
+    assert html_text.startswith("\U0001f6a8 <b>Monitor loop is not reporting</b>")
+
+
+def test_spend_near_the_cap_counts_as_attention(db):
+    now = utcnow()
+    _seed(db, now)
+    b = build_brief(db, since=now - timedelta(hours=1), now=now)
+    b.alerts, b.trades, b.decisions, b.pending_approvals = [], [], [], 0
+    b.daily_cap_usd, b.spend_today_usd = 1.0, 0.85
+    assert brief_mod.needs_attention(b)
+    assert "AI spend $0.85 today" in brief_mod.render_telegram(b, None, compact=True)
+
+
+def test_compact_review_uses_the_short_prompt(monkeypatch):
+    seen: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["prompt"] = cmd[2]
+        return subprocess.CompletedProcess(cmd, 0, stdout="Nothing looks off.\n", stderr="")
+
+    monkeypatch.setattr(review.shutil, "which", lambda name: "C:/claude.exe")
+    monkeypatch.setattr(review.subprocess, "run", fake_run)
+    assert review.claude_review("r", cli="claude", compact=True) == "Nothing looks off."
+    assert seen["prompt"] == review.COMPACT_REVIEW_PROMPT and "at most 3" in seen["prompt"]
+    review.claude_review("r", cli="claude")
+    assert seen["prompt"] == review.REVIEW_PROMPT
