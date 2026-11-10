@@ -45,10 +45,13 @@ class Settings(BaseSettings):
     # Accepts Alpaca's own dashboard naming too (ALPACA_PAPER_KEY_ID /
     # ALPACA_PAPER_SECRET) so keys can be pasted as-is.
     alpaca_api_key: str = Field(
-        "", validation_alias=AliasChoices("alpaca_api_key", "ALPACA_API_KEY", "ALPACA_PAPER_KEY_ID")
+        "",
+        repr=False,
+        validation_alias=AliasChoices("alpaca_api_key", "ALPACA_API_KEY", "ALPACA_PAPER_KEY_ID"),
     )
     alpaca_api_secret: str = Field(
         "",
+        repr=False,
         validation_alias=AliasChoices(
             "alpaca_api_secret", "ALPACA_API_SECRET", "ALPACA_PAPER_SECRET"
         ),
