@@ -214,6 +214,15 @@ class Settings(BaseSettings):
     def watchlist_tickers(self) -> list[str]:
         return [t.strip().upper() for t in self.watchlist.split(",") if t.strip()]
 
+    # --- execution (2026-11-10 review) ---
+    # Smallest swing order the book places: a position below this is dust,
+    # not evidence (Alpaca's own floor is $1). 0 disables the check.
+    min_swing_notional_usd: float = 25.0
+    # A ticker whose latest verdict was no_trade is not re-researched by the
+    # auto-cycle for this many calendar days, unless the price has entered
+    # that verdict's entry zone or a new event flag landed since. 0 = off.
+    committee_cooldown_days: int = 7
+
 
 settings = Settings()
 
@@ -488,6 +497,19 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "attr": "telegram_chat_id",
         "type": "str",
         "group": "ops",
+        "fingerprint": False,
+    },
+    # --- execution (2026-11-10 review) ---
+    "MIN_SWING_NOTIONAL_USD": {
+        "attr": "min_swing_notional_usd",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": False,
+    },
+    "COMMITTEE_COOLDOWN_DAYS": {
+        "attr": "committee_cooldown_days",
+        "type": "int",
+        "group": "universe",
         "fingerprint": False,
     },
 }

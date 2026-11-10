@@ -335,8 +335,13 @@ def execute_approved_theses(db: Session) -> int:
         except Exception:
             return 5.0
 
+    # swing theses only: the core book has its own executor (core.execute_plan)
     pending = sorted(
-        db.scalars(select(TradeThesis).where(TradeThesis.status == ThesisStatus.approved)),
+        db.scalars(
+            select(TradeThesis).where(
+                TradeThesis.status == ThesisStatus.approved, TradeThesis.book == SWING_BOOK
+            )
+        ),
         key=_conviction,
         reverse=True,
     )
@@ -359,6 +364,10 @@ def execute_approved_theses(db: Session) -> int:
             )
             if order.status == OrderStatus.filled:
                 count += 1
+        except executor.ThesisInvalidated:
+            db.commit()  # the rejection and its audit event are the record
+        except executor.AwaitingEntryZone as exc:
+            _note_waiting(db, thesis, str(exc))
         except executor.ExecutionRefused as exc:
             record_event(
                 db,
@@ -369,7 +378,77 @@ def execute_approved_theses(db: Session) -> int:
             )
             if "position already open" in str(exc):
                 thesis.status = ThesisStatus.rejected  # permanent: stop retrying
+        except Exception as exc:
+            # one broken entry must not take the pass - or another thesis's
+            # already-committed fill - down with it: discard its partial
+            # work, note it, move on; it is retried next pass
+            logger.exception("entry for %s failed", thesis.ticker)
+            db.rollback()
+            record_event(
+                db,
+                event_type="order.failed",
+                summary=f"{thesis.ticker}: entry failed ({type(exc).__name__}); retried next pass",
+                subject_type="thesis",
+                subject_id=thesis.id,
+            )
     return count
+
+
+def _note_waiting(db: Session, thesis: TradeThesis, note: str) -> None:
+    """A thesis above its entry zone is a normal state, not an error: audit
+    it once, then stay silent until the price enters the zone or the thesis
+    expires - no rejected order row and no event per pass."""
+    from midas.models import AuditEvent
+
+    seen = db.scalar(
+        select(AuditEvent).where(
+            AuditEvent.event_type == "thesis.waiting", AuditEvent.subject_id == thesis.id
+        )
+    )
+    if seen is not None:
+        return
+    record_event(
+        db,
+        event_type="thesis.waiting",
+        summary=f"{thesis.ticker}: {note}",
+        subject_type="thesis",
+        subject_id=thesis.id,
+    )
+
+
+def committee_cooldown(db: Session, ticker: str, price: float | None = None) -> str | None:
+    """Why the auto-cycle should NOT spend a committee on this ticker now:
+    its latest verdict was no_trade inside COMMITTEE_COOLDOWN_DAYS, the
+    price has not entered that verdict's entry zone, and no event flag has
+    landed since. None = run it. Re-asking the same question about the same
+    facts is the spend the cooldown exists to stop."""
+    from midas.models import ArtifactType, EventFlag
+    from midas.pipeline.runner import latest_artifact_for_ticker
+
+    days = int(settings.committee_cooldown_days)
+    ticker = ticker.upper()
+    if days <= 0 or not ticker:
+        return None
+    art = latest_artifact_for_ticker(db, ticker, ArtifactType.verdict)
+    if art is None or art.content.get("verdict") != "no_trade":
+        return None
+    ruled_at = aware(art.created_at)
+    if ruled_at < utcnow() - timedelta(days=days):
+        return None
+    lo, hi = art.content.get("entry_zone_low"), art.content.get("entry_zone_high")
+    if price is None:
+        try:
+            from midas.tools.market_data import get_quote
+
+            price = float(get_quote(ticker).data["price"])
+        except Exception:
+            price = None
+    if price is not None and lo and hi and float(lo) <= float(price) <= float(hi):
+        return None  # the price the verdict asked for has arrived
+    flags = db.scalars(select(EventFlag).where(EventFlag.ticker == ticker)).all()
+    if any(aware(f.created_at) > ruled_at for f in flags):
+        return None  # new facts since the verdict
+    return f"skipped (cooldown: no_trade on {ruled_at.date().isoformat()})"
 
 
 _calendar_cache: dict = {"date": "", "open": True}
@@ -678,10 +757,23 @@ def maybe_auto_cycle(session_factory: Callable[[], Session], router: ModelRouter
     )
     with session_factory() as db:
         held = {p.ticker for p in risk_engine.open_positions(db)}
-    fresh = [c for c in candidates if c.get("ticker") not in held]
+        cooling: dict[str, str] = {}
+        for cand in candidates:
+            ticker = str(cand.get("ticker") or "")
+            if ticker in held:
+                continue
+            why = committee_cooldown(db, ticker, cand.get("price"))
+            if why:
+                cooling[ticker] = why
+    # skipped candidates do not consume a seat: the cap counts committees run
+    fresh = [
+        c for c in candidates if c.get("ticker") not in held and c.get("ticker") not in cooling
+    ]
     for cand in candidates:
         if cand.get("ticker") in held:
             results[cand["ticker"]] = "skipped (already held - PM covers it)"
+        elif cand.get("ticker") in cooling:
+            results[cand["ticker"]] = cooling[cand["ticker"]]
     kept = fresh[: max(settings.auto_cycle_max_committees, 0)]
     for cand in fresh[len(kept) :]:
         results[cand["ticker"]] = "skipped (committee cap)"
@@ -842,9 +934,14 @@ def apply_time_stops(db: Session) -> list[str]:
         return []
     out: list[str] = []
     now = utcnow()
-    for p in db.scalars(
-        select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
-    ):
+    positions = list(
+        db.scalars(
+            select(Position).where(
+                Position.status == PositionStatus.open, Position.book == SWING_BOOK
+            )
+        )
+    )
+    for p in positions:
         days = (now - aware(p.opened_at)).days
         if days < settings.max_holding_days:
             continue
@@ -857,21 +954,26 @@ def apply_time_stops(db: Session) -> list[str]:
         )
         if pending is not None:
             continue  # already waiting on the operator
-        record_event(
-            db,
-            event_type="stop.time",
-            summary=f"{p.symbol}: time stop after {days}d (limit {settings.max_holding_days}d)",
-            actor_type=ActorType.system,
-            subject_type="position",
-            subject_id=p.id,
-        )
-        executor.propose_or_execute_exit(
-            db,
-            p,
-            decision="exit",
-            reasons=[f"time stop: held {days} days >= {settings.max_holding_days}-day limit"],
-        )
-        out.append(p.symbol)
+        try:
+            record_event(
+                db,
+                event_type="stop.time",
+                summary=f"{p.symbol}: time stop after {days}d (limit {settings.max_holding_days}d)",
+                actor_type=ActorType.system,
+                subject_type="position",
+                subject_id=p.id,
+            )
+            executor.propose_or_execute_exit(
+                db,
+                p,
+                decision="exit",
+                reasons=[f"time stop: held {days} days >= {settings.max_holding_days}-day limit"],
+            )
+            out.append(p.symbol)
+        except Exception:
+            # one position's broken exit must not roll back another's fill
+            logger.exception("time stop for %s failed", p.symbol)
+            db.rollback()
     return out
 
 
@@ -909,7 +1011,7 @@ def maybe_portfolio_review(
 
         equity = paper_broker.refresh_equity(db)
         deployed = risk_engine.open_notional_usd(db)
-        budget = equity * settings.max_total_notional_pct / 100
+        budget = equity * risk_engine.swing_budget_pct() / 100
         book = []
         for p in positions:
             thesis = db.get(TradeThesis, p.thesis_id)
@@ -1236,27 +1338,38 @@ def _run_monitor_pass(
                 )
         risk_engine.update_equity_anchors(db, equity)
         _record_l2_ledger(db)
+        was_halted = risk_engine.get_halt(db) is not None
         halt_reason = risk_engine.enforce_loss_halt(db, equity)
-        if halt_reason:
-            summary["halted"] = halt_reason
-            record_event(db, event_type="pipeline.halted", summary=halt_reason)
-            db.commit()
-            return summary  # a halted pipeline does nothing else
+        halt = risk_engine.get_halt(db)
+        if halt is not None:
+            # A halt stops NEW risk: research, entries, rebalances and LLM
+            # reviews. Risk management - stop breaches, time stops, ratchets,
+            # standing stops, reconciliation - runs regardless: the day the
+            # account is down 3% is the day the stops matter most.
+            summary["halted"] = halt_reason or str(halt.get("reason") or "halted")
+            if halt_reason and not was_halted:
+                record_event(db, event_type="pipeline.halted", summary=halt_reason)
+        halted = halt is not None
+        db.commit()  # marks, anchors and the halt are facts before any order work
         session_open = market_session_open()
         summary["session_open"] = session_open
         regime = market_regime(db)
         summary["regime"] = regime["detail"] + (" [RISK-OFF]" if not regime["risk_on"] else "")
         summary["premarket_flags"] = premarket_gap_sweep(db)
         regime_ok = regime["risk_on"] or settings.regime_throttle > 0
-        summary["executed"] = execute_approved_theses(db) if session_open and regime_ok else 0
-        if session_open and settings.core_enabled:
+        summary["executed"] = (
+            execute_approved_theses(db) if session_open and regime_ok and not halted else 0
+        )
+        if session_open and settings.core_enabled and not halted:
             try:
                 from midas.strategy import core as core_book
 
                 summary["core"] = core_book.run_rebalance(db)
             except Exception:
                 logger.exception("core rebalance failed")
+        db.commit()
         summary["stops_ratcheted"] = ratchet_stops(db)
+        db.commit()
         summary["time_stops"] = apply_time_stops(db) if session_open else []
         try:
             summary["standing_stops"] = paper_broker.sync_standing_stops(db)
@@ -1265,23 +1378,8 @@ def _run_monitor_pass(
         db.commit()
         due = [(p.id, trig, reason) for p, trig, reason in due_positions(db)]
 
-    try:
-        summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
-    except Exception:
-        logger.exception("auto-cycle failed")
-    try:
-        from midas.pipeline.events import maybe_event_scan
-
-        summary["event_scan"] = maybe_event_scan(session_factory, router)
-    except Exception:
-        logger.exception("event scan failed")
-
-    for position_id, trigger, reason in due:
+    def _review(position_id: Any, trigger: CheckpointTrigger, reason: str) -> None:
         try:
-            if not session_open:
-                continue  # closed market: no honest fill exists ANYWHERE -
-                # breaches wait for the open (GTC stops fire there
-                # first anyway); reviews would read stale data
             if trigger == CheckpointTrigger.invalidation:
                 decision = execute_stop_exit(session_factory, position_id, reason)
             else:
@@ -1294,10 +1392,43 @@ def _run_monitor_pass(
         except Exception:
             logger.exception("re-evaluation failed for position %s", position_id)
 
-    try:
-        summary["portfolio_review"] = maybe_portfolio_review(session_factory, router)
-    except Exception:
-        logger.exception("portfolio review failed")
+    # Closed market: no honest fill exists ANYWHERE - breaches wait for the
+    # open (GTC stops fire there first anyway) and reviews would read stale
+    # data. Stop-breach exits are deterministic code and go FIRST, before
+    # any LLM work can delay them - halted or not.
+    if session_open:
+        for position_id, trigger, reason in due:
+            if trigger == CheckpointTrigger.invalidation:
+                _review(position_id, trigger, reason)
+
+    if halted:
+        summary["skipped_for_halt"] = [
+            "entries",
+            "core_rebalance",
+            "auto_cycle",
+            "event_scan",
+            "reevaluations",
+            "portfolio_review",
+        ]
+    else:
+        try:
+            summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
+        except Exception:
+            logger.exception("auto-cycle failed")
+        try:
+            from midas.pipeline.events import maybe_event_scan
+
+            summary["event_scan"] = maybe_event_scan(session_factory, router)
+        except Exception:
+            logger.exception("event scan failed")
+        if session_open:
+            for position_id, trigger, reason in due:
+                if trigger != CheckpointTrigger.invalidation:
+                    _review(position_id, trigger, reason)
+        try:
+            summary["portfolio_review"] = maybe_portfolio_review(session_factory, router)
+        except Exception:
+            logger.exception("portfolio review failed")
 
     with session_factory() as db:
         scored = score_closed_positions(db)

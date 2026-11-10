@@ -42,6 +42,15 @@ class ExecutionRefused(Exception):
     """The execution-time risk re-check said no. Code wins."""
 
 
+class AwaitingEntryZone(ExecutionRefused):
+    """Spot is above the entry zone: not an error, re-checked each pass."""
+
+
+class ThesisInvalidated(ExecutionRefused):
+    """Spot is at or through the stop before entry: the thesis is dead and
+    has been marked rejected; it is never retried."""
+
+
 def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Order:
     """Create + submit the entry order for an approved thesis.
     Risk caps are re-checked HERE against live account/portfolio state."""
@@ -69,6 +78,7 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
     if loss_reason:
         raise ExecutionRefused(f"loss limit halt: {loss_reason}")
 
+    sector = ""
     if thesis.instrument == Instrument.option:
         structure = db.scalar(select(OptionStructure).where(OptionStructure.thesis_id == thesis.id))
         if structure is None:
@@ -83,7 +93,7 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
                     f"cannot verify entry zone (quote failed: {type(exc).__name__}); will retry"
                 ) from exc
             if spot > thesis.entry_zone_high:
-                raise ExecutionRefused(
+                raise AwaitingEntryZone(
                     f"awaiting entry zone: underlying {spot} above "
                     f"{thesis.entry_zone_high} - chasing a gap day at peak "
                     f"IV is the error this gate exists to prevent; retried "
@@ -112,13 +122,17 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
         )
         instrument = Instrument.option
     else:
-        sector = ""
         try:
             from midas.tools.market_data import get_quote
 
-            sector = get_quote(thesis.ticker).data.get("sector", "")
-        except Exception:
-            pass
+            quote = get_quote(thesis.ticker).data
+            spot = float(quote["price"])
+        except Exception as exc:
+            raise ExecutionRefused(
+                f"cannot verify entry zone (quote failed: {type(exc).__name__}); will retry"
+            ) from exc
+        sector = str(quote.get("sector") or "")
+        _gate_shares_entry(db, thesis, spot)
         rc = risk_engine.check_shares_trade(
             db,
             account_equity=equity,
@@ -126,7 +140,9 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
             stop_price=thesis.stop_price,
             sector=sector,
         )
-        if not rc.ok or rc.max_qty < 1:
+        # the engine already floors the size at MIN_SWING_NOTIONAL_USD; a
+        # fraction of a share is a valid size (FRACTIONAL_SHARES)
+        if not rc.ok or rc.max_qty <= 0:
             raise ExecutionRefused(f"execution-time risk re-check failed: {rc.checks}")
         qty = rc.max_qty
         symbol = thesis.ticker
@@ -159,17 +175,55 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
     )
     paper_broker.submit(db, order)
     if order.status == OrderStatus.filled:
-        sector = ""
-        try:
-            from midas.tools.market_data import get_quote
+        if not sector:
+            try:
+                from midas.tools.market_data import get_quote
 
-            sector = get_quote(thesis.ticker).data.get("sector", "")
-        except Exception:
-            pass
+                sector = str(get_quote(thesis.ticker).data.get("sector") or "")
+            except Exception:
+                pass
         paper_broker.apply_fill_to_position(db, order, thesis, sector=sector)
         thesis.status = ThesisStatus.executed
         _schedule_first_review(db, thesis, order)
+        # a fill is a fact at the broker: it must never sit in an open
+        # transaction that a later failure in the same pass could roll back
+        db.commit()
     return order
+
+
+def _gate_shares_entry(db: Session, thesis: TradeThesis, spot: float) -> None:
+    """The live quote decides whether a shares entry may go out NOW.
+    Through the stop: the thesis is already invalidated and is rejected for
+    good (buying it would be a stop-out in the making). Above the zone:
+    wait - the price may come back within the thesis's 5-day life."""
+    if thesis.stop_price and spot <= thesis.stop_price:
+        thesis.status = ThesisStatus.rejected
+        record_event(
+            db,
+            event_type="thesis.invalidated_before_entry",
+            summary=(
+                f"{thesis.ticker}: spot {spot:g} is at/through the stop "
+                f"{thesis.stop_price:g} before entry - thesis rejected, no order"
+            ),
+            run_id=thesis.run_id,
+            subject_type="thesis",
+            subject_id=thesis.id,
+            payload={
+                "spot": spot,
+                "stop": thesis.stop_price,
+                "entry_zone": [thesis.entry_zone_low, thesis.entry_zone_high],
+            },
+        )
+        db.flush()
+        raise ThesisInvalidated(
+            f"{thesis.ticker}: invalidated before entry (spot {spot:g} <= stop "
+            f"{thesis.stop_price:g}); thesis rejected"
+        )
+    if thesis.entry_zone_high and spot > thesis.entry_zone_high:
+        raise AwaitingEntryZone(
+            f"awaiting entry zone: {thesis.ticker} {spot:g} above "
+            f"{thesis.entry_zone_high:g}; re-checked each pass"
+        )
 
 
 def propose_or_execute_exit(
@@ -179,10 +233,17 @@ def propose_or_execute_exit(
     decision: str,
     reasons: list[str],
     artifact_id: uuid.UUID | None = None,
-) -> Order | ApprovalRequest:
+) -> Order | ApprovalRequest | None:
     """Route an exit/trim decision by autonomy level: L2 executes on paper;
-    below L2 it becomes a blocking approval request for the operator."""
-    qty = position.qty if decision in ("exit", "roll") else max(int(position.qty / 2), 1)
+    below L2 it becomes a blocking approval request for the operator.
+    None: a trim that would over-sell or leave dust was skipped (audited)."""
+    if decision in ("exit", "roll"):
+        qty = position.qty
+    else:
+        trim = _trim_qty(db, position)
+        if trim is None:
+            return None
+        qty = trim
     thesis = db.get(TradeThesis, position.thesis_id)
     if settings.autonomy_level >= 2:
         order = Order(
@@ -201,6 +262,7 @@ def propose_or_execute_exit(
         paper_broker.submit(db, order)
         if order.status == OrderStatus.filled:
             paper_broker.apply_fill_to_position(db, order, thesis)
+            db.commit()  # a broker fill never waits on the rest of the pass
         return order
 
     req = ApprovalRequest(
@@ -254,7 +316,50 @@ def execute_approved_exit(db: Session, approval: ApprovalRequest) -> Order:
     paper_broker.submit(db, order)
     if order.status == OrderStatus.filled:
         paper_broker.apply_fill_to_position(db, order, thesis)
+        db.commit()  # a broker fill never waits on the rest of the pass
     return order
+
+
+def _trim_qty(db: Session, position: Position) -> float | None:
+    """Half the position: three decimals for fractional shares, whole units
+    otherwise. None (audited) when the trim would over-sell, close the
+    position, or leave dust below MIN_SWING_NOTIONAL_USD - hold or exit are
+    the honest choices then. The old max(int(qty / 2), 1) sold a whole
+    share out of a 0.5-share position."""
+    fractional = settings.fractional_shares and position.instrument == Instrument.shares
+    qty = round(position.qty / 2, 3) if fractional else float(max(int(position.qty / 2), 1))
+    qty = min(qty, position.qty)
+    remainder = position.qty - qty
+    multiplier = 100 if position.instrument == Instrument.option else 1
+    price = position.last_mark_price or position.avg_price
+    remainder_usd = remainder * price * multiplier
+    floor = float(settings.min_swing_notional_usd)
+    if qty <= 0 or remainder <= 0 or remainder_usd < floor:
+        logger.info(
+            "%s: trim skipped - would leave %g (= $%.2f, floor $%.0f)",
+            position.symbol,
+            remainder,
+            remainder_usd,
+            floor,
+        )
+        record_event(
+            db,
+            event_type="exit.trim_skipped",
+            summary=(
+                f"{position.symbol}: trim of {qty:g} would leave {remainder:g} "
+                f"(${remainder_usd:,.2f}), below the ${floor:,.0f} floor - hold or exit instead"
+            ),
+            subject_type="position",
+            subject_id=position.id,
+            payload={
+                "qty": position.qty,
+                "trim_qty": qty,
+                "remainder_usd": round(remainder_usd, 2),
+                "floor_usd": floor,
+            },
+        )
+        return None
+    return qty
 
 
 def _schedule_first_review(db: Session, thesis: TradeThesis, order: Order) -> None:

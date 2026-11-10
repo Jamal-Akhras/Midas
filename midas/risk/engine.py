@@ -207,6 +207,16 @@ def regime_throttle(db: Session) -> float:
     return max(0.0, min(float(settings.regime_throttle), 1.0))
 
 
+def swing_budget_pct() -> float:
+    """The swing book's exposure budget as a % of equity. With the core
+    book on, the two books cannot both claim their full share: the swing
+    budget is capped at what the core allocation leaves."""
+    pct = float(settings.max_total_notional_pct)
+    if settings.core_enabled:
+        pct = min(pct, 100.0 - float(settings.core_allocation_pct))
+    return max(pct, 0.0)
+
+
 # ---------- sizing ----------
 
 
@@ -285,8 +295,21 @@ def check_shares_trade(
             )
         if max_qty <= 0:
             ok = _check(
-                checks, "size_nonzero", False, 0, ">= 1 share", "stop too far for the risk budget"
+                checks, "size_nonzero", False, 0, "> 0 shares", "stop too far for the risk budget"
             )
+        else:
+            # a fraction of a share is a real position; dust is not
+            floor = float(settings.min_swing_notional_usd)
+            notional = max_qty * entry_price
+            if floor > 0:
+                ok &= _check(
+                    checks,
+                    "min_notional",
+                    notional >= floor,
+                    f"${notional:,.2f}",
+                    f">= ${floor:,.0f}",
+                    "a position below the floor is dust, not evidence",
+                )
     ok &= _portfolio_checks(
         db, checks, sector, account_equity=account_equity, new_notional=max_qty * entry_price
     )
@@ -382,13 +405,14 @@ def _portfolio_checks(
     )
     if account_equity > 0 and new_notional > 0:
         deployed = open_notional_usd(db)
-        budget = account_equity * settings.max_total_notional_pct / 100
+        budget_pct = swing_budget_pct()
+        budget = account_equity * budget_pct / 100
         ok &= _check(
             checks,
             "total_exposure",
             deployed + new_notional <= budget,
             f"${deployed:,.0f} open + ${new_notional:,.0f} new",
-            f"<= {settings.max_total_notional_pct}% of equity (${budget:,.0f})",
+            f"<= {budget_pct:g}% of equity (${budget:,.0f})",
         )
     # sector fail-closed: unknown classification is a bucket with the same
     # caps, never a bypass
