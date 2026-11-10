@@ -7,6 +7,18 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- A `screen_context` artifact per committee run: the screener's record for
+  the ticker plus a code-computed technical block on completed bars, read
+  by triage, bull, bear and the investor. Every stage's task text states
+  the book and its holding window.
+- `COMMITTEE_COOLDOWN_DAYS`: a ticker whose latest verdict was no_trade
+  sits out the auto-cycle unless its price enters that verdict's entry
+  zone or a new event flag lands, so committee seats go to new names.
+- `MIN_SWING_NOTIONAL_USD`: a minimum-notional risk check that applies at
+  committee time and at execution.
+- Insider activity from Finnhub transaction codes (net shares bought and
+  sold, counts by code), falling back to a filing list that states it
+  carries no direction.
 - `midas/notify`: an operator brief built from the ledger (`midas brief`),
   Telegram delivery (`--send`, `midas notify setup|test`) and an optional
   review by Claude Code's CLI with tools disabled (`--review`). The Telegram
@@ -56,6 +68,45 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- The executor refused any thesis sized under one share. On a $1,000
+  account every candidate sizes below one share, so no swing trade could
+  execute; the gate is now zero shares.
+- The deep scan asked for the SIP feed, was refused on the free plan, fell
+  back to IEX (a few percent of real volume) and applied the dollar-volume
+  floor to today's bar minutes after the open; 15 of 6,435 symbols
+  survived. It now reads the delayed consolidated feed, floors on the
+  previous full session, prices from the latest trade and scores completed
+  bars only. `get_quote` asks the delayed consolidated feed when the IEX
+  print is older than fifteen minutes.
+- The core book read the session in progress as a close for its 200-day
+  rule and stamped the month before any order went out. It now signals on
+  the prior close, records the signal date, stamps the month after
+  execution with per-order failure events and retries, tops up an existing
+  position instead of opening a second row, and rejects the thesis of a
+  slice whose first buy did not fill.
+- A loss halt returned from the monitor pass before the stop layer ran. The
+  pass now keeps stop management, reconciliation and the heartbeat running
+  while halted and records the halt once; stop-breach exits run before the
+  LLM auto-cycle.
+- Entries at or through the stop are rejected as invalidated instead of
+  bought at market; entries above the zone wait with one audit event rather
+  than a rejected order per pass; trims halve fractional positions; fills
+  are committed as soon as the broker confirms them; the entry queue
+  handles only swing-book theses; the swing budget is capped at what the
+  core book leaves.
+- Fundamentals labelled trailing P/E as forward and TTM growth as
+  projected, the earnings calendar returned the last report as the next,
+  and a count of Form 4 filings was read as insider selling. Labels are
+  honest, the calendar is queried forward with past dates nulled, and the
+  prompts no longer treat filing counts as direction.
+- In the long-only book the shares fallback was sized on the bear's side
+  whenever the bear case won the conviction comparison, failing the
+  stop-below-entry check and forcing no_trade. It is now sized as a long
+  with the comparison stated to the investor. A no_trade verdict carrying
+  an entry zone is rejected by the schema so the repair prompt converts it.
+- `EDITABLE_SETTINGS` nested the core-book settings inside the
+  REGIME_THROTTLE entry, hiding them from the Settings tab.
+- The `Settings` repr printed every credential field; they are `repr=False`.
 - Mirrored fills kept the planned quantity in the ledger while Alpaca
   filled the three-decimal quantity it was sent, so every reconciliation
   flagged the book's own fills. The ledger now records the quantity the
