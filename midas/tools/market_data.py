@@ -3,6 +3,7 @@
 
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -23,6 +24,72 @@ def _alpaca_headers() -> dict:
 
 def _alpaca_enabled() -> bool:
     return bool(settings.alpaca_api_key and settings.alpaca_api_secret)
+
+
+# A trade older than this is not "latest" in any useful sense. It equals the
+# lag of Alpaca's delayed consolidated feed, so a stale IEX print can be
+# checked against the whole tape without a paid subscription.
+QUOTE_STALE_AFTER_MIN = 15
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_rfc3339(value: str | None) -> datetime | None:
+    """Alpaca stamps trades like 2026-11-10T16:13:30.185396667Z: nanoseconds
+    and a Z suffix, both of which datetime.fromisoformat rejects before
+    Python 3.11. None when unparsable; callers treat that as stale."""
+    if not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = re.sub(r"(\.\d{6})\d+", r"\1", text)
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _fetch_trade(ticker: str, feed: str) -> dict:
+    r = httpx.get(
+        f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/trades/latest",
+        params={"feed": feed},
+        headers=_alpaca_headers(),
+        timeout=15,
+    )
+    r.raise_for_status()
+    trade = r.json()["trade"]
+    return {"price": trade["p"], "feed": feed, "trade_at": str(trade.get("t") or "")}
+
+
+def _latest_trade(ticker: str) -> dict:
+    """Price, feed and timestamp of the freshest trade the account may read.
+
+    IEX is real-time but carries 3-10% of the tape: a name that has not
+    printed there for a while reports an old trade as "latest" (RSG opened
+    2026-11-10 showing yesterday's close for 18+ minutes while the
+    consolidated tape had moved). When the IEX print is older than the
+    delayed consolidated feed's lag, that feed is asked too and the newer
+    trade wins. An IEX refusal propagates: that is keys or plan, and the
+    caller's fall-through to the next provider handles it."""
+    best = _fetch_trade(ticker, "iex")
+    seen_at = _parse_rfc3339(best["trade_at"])
+    if seen_at is not None and _now() - seen_at <= timedelta(minutes=QUOTE_STALE_AFTER_MIN):
+        return best
+    try:
+        delayed = _fetch_trade(ticker, "delayed_sip")
+    except httpx.HTTPError as exc:  # refused (plan) or down: the IEX print stands
+        logger.warning(
+            "delayed consolidated trade unavailable for %s: %s", ticker, type(exc).__name__
+        )
+        return best
+    delayed_at = _parse_rfc3339(delayed["trade_at"])
+    if delayed_at is not None and (seen_at is None or delayed_at > seen_at):
+        return delayed
+    return best
 
 
 _sector_cache: dict[str, str] = {}
@@ -60,7 +127,8 @@ def _yf():
 
 
 def get_quote(ticker: str) -> ToolResult:
-    """Latest price, previous close, average volume, sector."""
+    """Latest price, previous close, average volume, sector - plus the feed
+    and timestamp the price came from (see _latest_trade)."""
     ticker = ticker.upper()
     if settings.effective_demo_mode:
         q = demo_data.QUOTES.get(ticker)
@@ -71,13 +139,8 @@ def get_quote(ticker: str) -> ToolResult:
         return ToolResult(data={"ticker": ticker, **q}, source="demo")
     if _alpaca_enabled():
         try:
-            r = httpx.get(
-                f"{settings.alpaca_data_base_url}/v2/stocks/{ticker}/trades/latest",
-                headers=_alpaca_headers(),
-                timeout=15,
-            )
-            r.raise_for_status()
-            price = r.json()["trade"]["p"]
+            trade = _latest_trade(ticker)
+            price = trade["price"]
             bars = _alpaca_bars(ticker, days=30)
             if bars:  # empty bars => zeros would poison the floor check;
                 # fall through to yfinance instead of lying
@@ -95,6 +158,8 @@ def get_quote(ticker: str) -> ToolResult:
                         "prev_close": prev_close,
                         "avg_volume": avg_vol,
                         "sector": _finnhub_sector(ticker),
+                        "feed": trade["feed"],
+                        "trade_at": trade["trade_at"],
                     },
                     source="alpaca",
                 )

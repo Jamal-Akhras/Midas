@@ -1,10 +1,11 @@
 """Full-market deep scan: deterministic, $0 AI.
 
-Every tradable US common stock -> bulk snapshots (price/liquidity floor) ->
-daily bars for the most liquid survivors -> a setup score computed from
-bar STRUCTURE (trend, extension, pullback depth, volume contraction), not
-from today's green candle. The top names join the screener universe, where
-the LLM funnel (screener -> triage -> committee) applies judgment.
+Every tradable US common stock -> bulk snapshots on the delayed consolidated
+feed (price floor, PREVIOUS-day liquidity floor) -> daily bars for the most
+liquid survivors -> a setup score computed from the STRUCTURE of completed
+sessions (trend, extension, pullback depth, volume contraction), not from
+today's green candle. The top names join the screener universe, where the
+LLM funnel (screener -> triage -> committee) applies judgment.
 
 Scale knobs are config: raise DEEP_SCAN_MAX_BARS and DEEP_SCAN_KEEP as the
 account and committee budget grow - the architecture does not change.
@@ -12,6 +13,7 @@ account and committee budget grow - the architecture does not change.
 
 import logging
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -69,35 +71,60 @@ def all_tradable_symbols() -> list[str]:
     return syms
 
 
-def _snapshot_batch(symbols: list[str]) -> dict:
-    for feed in ("sip", "iex"):
+# Snapshot feeds in order of preference. `delayed_sip` is the consolidated
+# tape 15 minutes behind: the only consolidated view the free plan allows on
+# this endpoint (`sip` answers 403 and is not asked for - that was a wasted
+# call per batch). `iex` is real-time but carries 3-10% of the volume, and a
+# name that has not printed there yet still shows YESTERDAY's bar as today's;
+# it is the fallback, and the feed used is persisted with the scan.
+_SNAPSHOT_FEEDS = ("delayed_sip", "iex")
+
+
+def _snapshot_batch(symbols: list[str]) -> tuple[dict, str]:
+    """Bulk snapshots for up to 100 symbols and the feed that served them.
+    Raises httpx.HTTPError when the last feed is refused too: that is keys
+    or plan, not an empty market, and the caller logs the batch."""
+    for feed in _SNAPSHOT_FEEDS:
         r = httpx.get(
             f"{settings.alpaca_data_base_url}/v2/stocks/snapshots",
             params={"symbols": ",".join(symbols), "feed": feed},
             headers=_headers(),
             timeout=30,
         )
-        if r.status_code in (401, 403) and feed == "sip":
+        if r.status_code in (401, 403) and feed != _SNAPSHOT_FEEDS[-1]:
             continue
         r.raise_for_status()
         body = r.json()
-        return body.get("snapshots", body) or {}
-    return {}
+        return body.get("snapshots", body) or {}, feed
+    return {}, ""  # unreachable: the last feed raises; keeps the signature total
 
 
 def stage_a(snaps: dict) -> list[dict]:
-    """Price + liquidity + sanity floors on snapshot data. Deterministic."""
+    """Price + liquidity + sanity floors on snapshot data. Deterministic.
+
+    Liquidity is the PREVIOUS full session's dollar volume: at 09:45 today's
+    bar holds a few minutes of trading, and on IEX a name that has not
+    printed yet still carries yesterday's bar as today's (RSG, 2026-11-10).
+    Price is the latest trade, so the day-change filter sees today's gap even
+    when the day bar is stale. A snapshot without previous-day volume falls
+    back to the day bar (fixtures; Alpaca always sends it)."""
     out = []
     for sym, s in snaps.items():
         day = s.get("dailyBar") or {}
         prev = s.get("prevDailyBar") or {}
-        price = day.get("c") or (s.get("latestTrade") or {}).get("p")
-        if not price or not day.get("v") or not prev.get("c"):
+        trade = s.get("latestTrade") or {}
+        price = trade.get("p") or day.get("c") or prev.get("c")
+        if not price or not prev.get("c"):
             continue
         if price < settings.deep_scan_min_price:
             continue
-        dollar_vol = day["v"] * price
-        if dollar_vol < settings.deep_scan_min_dollar_volume:
+        if prev.get("v"):
+            prev_dollar_vol = prev["v"] * prev["c"]
+        elif day.get("v"):
+            prev_dollar_vol = day["v"] * price
+        else:
+            continue
+        if prev_dollar_vol < settings.deep_scan_min_dollar_volume:
             continue
         chg = (price / prev["c"] - 1) * 100
         if not (-15 <= chg <= 25):  # halts, blowups, buyout gaps: not setups
@@ -106,7 +133,8 @@ def stage_a(snaps: dict) -> list[dict]:
             {
                 "ticker": sym,
                 "price": round(float(price), 2),
-                "dollar_vol": dollar_vol,
+                "dollar_vol": (day.get("v") or 0) * price,  # today so far, for reference
+                "prev_dollar_vol": prev_dollar_vol,
                 "day_chg_pct": round(chg, 2),
             }
         )
@@ -147,6 +175,32 @@ def setup_score(bars: list[dict]) -> float | None:
     return round(min(score, 100.0), 1)
 
 
+def completed_bars(bars: list[dict], today: str) -> list[dict]:
+    """Drop a trailing bar dated `today`: during the session Alpaca serves the
+    day in progress as a daily bar, and at 09:45 it holds the opening print
+    as its close and 2-20% of a normal day's volume. Scored as a full session
+    it drags the five-day volume average down, so the contraction bonus fires
+    on volume that simply has not traded yet (RSG, 2026-11-10: v5/v20 1.12 on
+    completed bars, 0.95 with the partial one: +10 points). Pure; `today` is
+    the exchange date, see _today_new_york."""
+    if bars and str(bars[-1].get("date", "")) == today:
+        return bars[:-1]
+    return bars
+
+
+def _today_new_york(now: datetime | None = None) -> str:
+    """The exchange's calendar date (Alpaca stamps daily bars in New York
+    time); UTC is already tomorrow from 19:00/20:00 ET. Falls back to the UTC
+    date only when the zone database is missing."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+
+        return now.astimezone(ZoneInfo("America/New_York")).date().isoformat()
+    except Exception:
+        return now.date().isoformat()
+
+
 def run_deep_scan(db) -> dict:
     """Sweep the whole market; persist survivors for today's screen."""
     from midas.models import SystemState
@@ -161,9 +215,12 @@ def run_deep_scan(db) -> dict:
     symbols = all_tradable_symbols()
     logger.info("deep scan: sweeping %s symbols (this takes a few minutes)", len(symbols))
     survivors: list[dict] = []
+    feeds: set[str] = set()
     for i in range(0, len(symbols), 100):
         try:
-            survivors += stage_a(_snapshot_batch(symbols[i : i + 100]))
+            snaps, feed = _snapshot_batch(symbols[i : i + 100])
+            feeds.add(feed)
+            survivors += stage_a(snaps)
         except httpx.HTTPError as exc:
             logger.warning("deep scan batch %s failed: %s", i, type(exc).__name__)
         if i and i % 2000 == 0:
@@ -172,16 +229,19 @@ def run_deep_scan(db) -> dict:
             )
         time.sleep(0.35)  # stay far under the API rate limit
 
-    survivors.sort(key=lambda x: -x["dollar_vol"])
+    # rank by the previous full session: today's partial bar would put the
+    # morning's news names first and the rest in order of minutes traded
+    survivors.sort(key=lambda x: -x["prev_dollar_vol"])
     logger.info(
         "deep scan: %s liquid survivors; bar analysis on top %s",
         len(survivors),
         settings.deep_scan_max_bars,
     )
+    session_date = _today_new_york()
     checked, kept = 0, []
     for cand in survivors[: settings.deep_scan_max_bars]:
         try:
-            bars = get_daily_bars(cand["ticker"], days=60).data
+            bars = completed_bars(get_daily_bars(cand["ticker"], days=60).data, session_date)
         except Exception:
             continue
         checked += 1
@@ -193,6 +253,7 @@ def run_deep_scan(db) -> dict:
 
     value = {
         "date": today,
+        "feed": "+".join(sorted(feeds)),  # the tape the floors were applied on
         "symbols_scanned": len(symbols),
         "stage_a_survivors": len(survivors),
         "bars_checked": checked,
