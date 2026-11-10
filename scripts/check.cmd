@@ -3,7 +3,8 @@ rem Operator check: positions, recent audit trail and the track-record stats,
 rem written to logs\checks\<timestamp>.txt (and latest.txt), then the Telegram
 rem brief with a Claude review of that report (midas brief --send --review).
 rem Places no orders and calls no model through the router. Meant for a
-rem scheduler (Windows Task Scheduler, twice a day) but fine by hand.
+rem scheduler (Windows Task Scheduler: 09:00 local plus hourly through the
+rem US session on weekdays) but fine by hand.
 rem
 rem   scripts\check.cmd [path\to\midas.exe]
 rem
