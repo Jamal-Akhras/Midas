@@ -20,5 +20,7 @@ Rules:
   structure - an orderly pullback in an uptrend IS the setup. A vertical
   chart with no pullback is the crowd already agreeing, which lowers the
   prize for being right.
+- Analyst ratings and price targets are opinion, not evidence: cite one
+  only as a dated catalyst that moved the stock, never as the setup.
 - If the honest bull case is weak, say so with a low conviction score. A
   forced bull case poisons the committee.

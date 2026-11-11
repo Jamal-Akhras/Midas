@@ -83,6 +83,80 @@ def universe_tickers() -> list[str]:
     return base
 
 
+def screen_task_text(tickers: list[str], scan_scores: list[str]) -> str:
+    """The screener's task: the universe, the floors, the deep scan's quant
+    ranking when there is one (a structural anchor the model did not have
+    before), and the gate that runs after it."""
+    lines = [
+        f"Scan this universe for setup candidates. Universe: {', '.join(tickers)}",
+        f"Floors (deterministically re-checked): price >= ${settings.min_price_usd}, "
+        f"avg daily volume >= {settings.min_avg_daily_volume:,}.",
+    ]
+    if scan_scores:
+        lines.append(
+            "Deep-scan quant scores today (0-100, code-computed from completed bars: "
+            "uptrend, orderly pullback, contracting volume): "
+            + ", ".join(scan_scores)
+            + ". A universe name without a score was not scored, not rejected."
+        )
+    if settings.setup_gate_enabled:
+        lines.append(
+            "Setup gate (deterministic, after you): a candidate below its 50-day average, "
+            f"more than {settings.setup_gate_max_pullback_pct:.0f}% off its 20-day high, "
+            f"or down more than {settings.setup_gate_max_5d_drop_pct:.0f}% in five sessions "
+            "is dropped in code; labelling one as a setup wastes the slot."
+        )
+    return "\n".join(lines)
+
+
+def apply_setup_gate(
+    db: Session, run: PipelineRun, candidates: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Check each floor-passing candidate's setup label against the
+    code-computed technical block; drop the charts no setup describes and
+    record why. Bars that cannot be fetched leave the candidate in: the
+    gate removes broken charts, it does not punish missing data."""
+    if not settings.setup_gate_enabled:
+        return candidates, []
+    from midas.pipeline.committee import CONTEXT_BARS, technical_block
+    from midas.pipeline.setup_gate import setup_gate
+    from midas.tools.base import ToolContext
+    from midas.tools.registry import TOOLS
+
+    kept: list[dict] = []
+    gated: list[dict] = []
+    for cand in candidates:
+        ticker = str(cand.get("ticker", "")).upper()
+        try:
+            execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
+            bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
+            tech = technical_block(bars)
+        except Exception as exc:  # noqa: BLE001 - best-effort per ticker
+            logger.warning("setup gate: bars unavailable for %s (%s)", ticker, type(exc).__name__)
+            kept.append(cand)
+            continue
+        failures = setup_gate(tech, str(cand.get("setup") or ""))
+        if not failures:
+            kept.append(cand)
+            continue
+        gated.append(
+            {
+                "ticker": ticker,
+                "setup": cand.get("setup"),
+                "score": cand.get("score"),
+                "reasons": failures,
+                "technical": tech,
+            }
+        )
+        record_event(
+            db,
+            event_type="screen.gated",
+            summary=f"{ticker}: dropped by the setup gate - " + "; ".join(failures),
+            run_id=run.id,
+        )
+    return kept, gated
+
+
 def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> dict:
     """Returns the screen artifact content (candidates already floor-checked).
     Own session; commits per step."""
@@ -110,24 +184,25 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
         from midas.models.base import utcnow as _now
 
         ds = db.get(SystemState, "deep_scan")
+        scan_scores: list[str] = []
         if ds and ds.value.get("date") == _now().date().isoformat():
             for cand in ds.value.get("kept", []):
                 t = str(cand.get("ticker", "")).upper()
-                if t and t not in tickers:
+                if not t:
+                    continue
+                if t not in tickers:
                     tickers.append(t)
+                try:
+                    scan_scores.append(f"{t} {float(cand.get('score') or 0):.0f}")
+                except (TypeError, ValueError):
+                    scan_scores.append(t)
         try:
             _, parsed = run_agent_stage(
                 db,
                 router,
                 run,
                 AGENT_DEFS["screener"],
-                task_text=(
-                    "Scan this universe for setup candidates. "
-                    f"Universe: {', '.join(tickers)}\n"
-                    f"Floors (deterministically re-checked): price >= "
-                    f"${settings.min_price_usd}, avg daily volume >= "
-                    f"{settings.min_avg_daily_volume:,}."
-                ),
+                task_text=screen_task_text(tickers, scan_scores),
             )
         except Exception as exc:
             run.status = RunStatus.failed
@@ -146,8 +221,10 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
                 kept.append(cand)
             else:
                 dropped.append({"ticker": cand["ticker"], "reason": "below price/volume floor"})
+        kept, gated = apply_setup_gate(db, run, kept)
         content["candidates"] = kept
         content["floor_rejections"] = dropped
+        content["setup_rejections"] = gated
         from midas.models import ScreenCandidate
 
         for cand in kept:
@@ -163,9 +240,15 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
         record_event(
             db,
             event_type="run.completed",
-            summary=f"Screen kept {len(kept)} candidate(s), floor-dropped {len(dropped)}",
+            summary=(
+                f"Screen kept {len(kept)} candidate(s), floor-dropped {len(dropped)}, "
+                f"gate-dropped {len(gated)}"
+            ),
             run_id=run.id,
-            payload={"kept": [c["ticker"] for c in kept]},
+            payload={
+                "kept": [c["ticker"] for c in kept],
+                "gated": [g["ticker"] for g in gated],
+            },
         )
         db.commit()
         return content

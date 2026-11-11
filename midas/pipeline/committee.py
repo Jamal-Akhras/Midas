@@ -53,6 +53,7 @@ from midas.pipeline.runner import (
     stage_provider,
     store_code_artifact,
 )
+from midas.pipeline.setup_gate import setup_gate
 from midas.providers.router import ModelRouter
 from midas.risk import engine as risk_engine
 from midas.risk import structurer_checks, verdict_checks
@@ -167,14 +168,42 @@ def screen_context_content(
             "excluded): extension is vs the 10-day mean, pullback is from the 20-day high, "
             "volume_5d_over_20d < 1 means volume contracted into the pullback"
         )
+    failures = setup_gate(tech, str((screen or {}).get("setup") or "")) if tech else []
+    if tech is None:
+        gate_note = "setup gate: not evaluated (technical state unknown)"
+    elif failures:
+        gate_note = (
+            "SETUP GATE: FAILED - "
+            + "; ".join(failures)
+            + ". No swing setup describes this chart; a trade verdict here needs a "
+            "reason the gate cannot see."
+        )
+    else:
+        gate_note = "setup gate: passed (no structural objection to the setup)"
     return {
         "ticker": ticker,
         "screen": screen,
         "screen_note": screen_note,
         "technical": tech,
         "technical_note": technical_note,
+        "gate": {"passed": not failures, "failures": failures, "evaluated": tech is not None},
+        "gate_note": gate_note,
         "deterministic": True,
     }
+
+
+def conviction_comparison(bull: float, bear: float) -> str:
+    """The risk check's one-line account of the bull and bear convictions.
+    A tie is reported as a tie: telling the investor the bull "won" a 7-7
+    nudged a long-only book toward entering (NVDA, 2026-11-11)."""
+    if bull == bear:
+        return (
+            f"bull and bear tied at {bull:.1f} - the tie is yours to break on the "
+            "evidence (structure outranks opinion), not on the sizing"
+        )
+    if bull > bear:
+        return f"bull case won the conviction comparison ({bull:.1f} vs {bear:.1f})"
+    return f"bear case won the conviction comparison ({bear:.1f} vs {bull:.1f})"
 
 
 class CommitteeResult:
@@ -507,11 +536,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
         run = db.get(PipelineRun, run_id)
         structure = required_artifact(db, run_id, ArtifactType.structure).content
         equity = _account_equity(db)
-        comparison = (
-            f"bull case won the conviction comparison ({bull_conviction:.1f} vs {bear_conviction:.1f})"
-            if direction == "bullish"
-            else f"bear case won the conviction comparison ({bear_conviction:.1f} vs {bull_conviction:.1f})"
-        )
+        comparison = conviction_comparison(bull_conviction, bear_conviction)
         if structure.get("available"):
             pick = structure["validated_pick"]
             rc = risk_engine.check_option_trade(

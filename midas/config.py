@@ -226,6 +226,18 @@ class Settings(BaseSettings):
     # that verdict's entry zone or a new event flag landed since. 0 = off.
     committee_cooldown_days: int = 7
 
+    # --- setup gate (2026-11-11) ---
+    # The screener's setup label is checked against the code-computed
+    # technical block before any committee spend: a chart below its 50-day
+    # average, too far off its 20-day high, down too much in five sessions,
+    # or (for a pullback) on expanding volume is dropped. Thresholds are
+    # the setups' own definitions as numbers; they shape what the committee
+    # sees, so they count toward the L2 strategy fingerprint.
+    setup_gate_enabled: bool = True
+    setup_gate_max_pullback_pct: float = 12.0  # off the 20-day high
+    setup_gate_max_5d_drop_pct: float = 10.0
+    setup_gate_max_volume_ratio: float = 1.3  # 5d/20d volume into a pullback
+
 
 settings = Settings()
 
@@ -514,6 +526,30 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "type": "int",
         "group": "universe",
         "fingerprint": False,
+    },
+    "SETUP_GATE_ENABLED": {
+        "attr": "setup_gate_enabled",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "SETUP_GATE_MAX_PULLBACK_PCT": {
+        "attr": "setup_gate_max_pullback_pct",
+        "type": "float",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "SETUP_GATE_MAX_5D_DROP_PCT": {
+        "attr": "setup_gate_max_5d_drop_pct",
+        "type": "float",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "SETUP_GATE_MAX_VOLUME_RATIO": {
+        "attr": "setup_gate_max_volume_ratio",
+        "type": "float",
+        "group": "universe",
+        "fingerprint": True,
     },
 }
 

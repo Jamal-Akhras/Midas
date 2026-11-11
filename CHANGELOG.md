@@ -7,6 +7,15 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- A setup gate: after the price/volume floors, each screen candidate's
+  setup label is checked in code against the technical block (above the
+  50-day average, within `SETUP_GATE_MAX_PULLBACK_PCT` of the 20-day
+  high, not down more than `SETUP_GATE_MAX_5D_DROP_PCT` in five sessions,
+  and for a pullback a 5d/20d volume ratio at most
+  `SETUP_GATE_MAX_VOLUME_RATIO`). Failing charts are dropped with their
+  reasons recorded; the screen context carries the same verdict for
+  manual runs. The screener's task now lists the deep scan's quant scores
+  and the gate's limits.
 - A `screen_context` artifact per committee run: the screener's record for
   the ticker plus a code-computed technical block on completed bars, read
   by triage, bull, bear and the investor. Every stage's task text states
@@ -57,6 +66,11 @@ not yet cut a release, so everything sits under Unreleased.
   `cost.divergence` audit event when they disagree; `docs/tollgate.md`.
 
 ### Changed
+- The risk check reports a bull/bear conviction tie as a tie instead of a
+  bull win. The investor, triage, bull and bear prompts state that analyst
+  ratings, price targets and headline counts are opinion, not evidence
+  about a setup, and that a bear case grounded in the technical block
+  beats a bull case grounded in opinion.
 - `routing.yaml` moves to current Anthropic model IDs (Opus/Sonnet/Haiku
   5.5) with prices checked on 2026-11-08; cheap stages lead with Haiku.
 - Dependency ranges carry upper bounds on the next major version.

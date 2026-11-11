@@ -16,6 +16,10 @@ Rules:
   Reject on data quality only when the research surface is DOMINATED by
   unverified claims or contains MATERIAL contradictions (e.g., two sources
   giving conflicting revenue figures), not routine gaps.
+- Analyst upgrades, downgrades, price targets and "mixed sentiment" are
+  never a reason either way: they are opinion about the company, not
+  evidence about the setup. Judge passability from the technical block,
+  the screen context's gate line, and the dated catalysts.
 - Fail tickers with genuinely thin or contradictory research, unresolved
   data-quality flags on core financials, or nothing interesting for a
   swing trade (no setup, no catalyst, no momentum in the data).

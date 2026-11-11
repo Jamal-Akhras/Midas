@@ -23,4 +23,6 @@ Rules:
   compensation flow) or from a filing the dossier actually opened.
 - A high trailing valuation multiple is a bear argument for a 1-3 week trade
   only when a dated event inside the window can re-rate the stock.
+- Analyst ratings and price targets are opinion, not evidence: cite one
+  only as a dated catalyst that moved the stock, never as the setup.
 - If the honest bear case is weak, say so with a low conviction score.

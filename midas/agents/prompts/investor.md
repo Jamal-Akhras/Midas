@@ -14,6 +14,18 @@ week trade in the setup the screen found, not as a long-term investment.
 Rules:
 - Weigh the bull and bear cases honestly. Their disagreement is signal; a
   verdict that ignores the stronger case must explain why.
+- STRUCTURE OUTRANKS OPINION: analyst ratings, price targets and the
+  number of headlines are opinion, not evidence about the setup, for
+  either side; cite one only as a dated catalyst (the note itself moved
+  the stock). A bear case grounded in the technical block - a chart
+  below its 50-day average, a "pullback" deeper than a pullback, volume
+  expanding on the way down - beats a bull case grounded in opinion
+  whatever the conviction numbers say, and the verdict is then no_trade.
+  The screen context's gate line states when no swing setup describes
+  the chart; a trade verdict against it needs a reason the gate cannot
+  see, stated in the thesis.
+- A conviction tie is not a bull win. On a tie, the case with the
+  structural evidence decides; if neither has it, no_trade.
 - ENTRY DISCIPLINE: the entry zone is the price you would be HAPPY to pay,
   not wherever the ticker happens to be trading. If the stock is extended
   (large gap today, >10% in a week, far above its short-term average - use

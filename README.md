@@ -92,6 +92,7 @@ Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 |---|---|---|
 | Universe screen | Screener Agent | LLM + market-data tools |
 | Price/volume floors | code | deterministic |
+| Setup gate | code | deterministic: the setup label checked against the technical block |
 | Fundamentals | Earnings/Fundamentals Agent | LLM + earnings/estimates tools |
 | Deep research | Deep Research Agent | LLM + EDGAR, insiders, web search, page fetch |
 | Catalysts | Catalyst/News Agent | LLM + news/earnings tools |
