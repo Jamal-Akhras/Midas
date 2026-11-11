@@ -328,3 +328,90 @@ def test_auto_cycle_cooldown_can_be_disabled(factory, demo_router, monkeypatch):
     out = monitor.maybe_auto_cycle(factory, demo_router)
     assert ran == ["COOL"]
     assert out["committees"]["COOL"] == "done"
+
+
+# ---- 2026-11-11: act on the yes ----
+# A thesis the auto-cycle approves is executed in the SAME pass, on the facts
+# the committee judged - not on the next pass's price up to 15 minutes later.
+
+
+def _cycle_that_approves(factory, calls, ticker="NVDA"):
+    def _fake(session_factory, router):
+        calls.append("auto_cycle")
+        with factory() as db:
+            _thesis(db, ticker)
+            db.commit()
+        return {"screened": 1, "committees": {ticker: "done"}}
+
+    return _fake
+
+
+def _real_entries_recorded(monkeypatch, calls):
+    real = monitor.execute_approved_theses
+    monkeypatch.setattr(
+        monitor, "execute_approved_theses", lambda db: calls.append("entries") or real(db)
+    )
+
+
+def _fills_everything(monkeypatch):
+    executed: list[str] = []
+
+    class _Filled:
+        status = OrderStatus.filled
+
+    def _fake(db, th, approved_by):
+        executed.append(th.ticker)
+        return _Filled()
+
+    monkeypatch.setattr(monitor.executor, "execute_thesis", _fake)
+    return executed
+
+
+def test_a_thesis_approved_by_the_cycle_is_executed_in_the_same_pass(
+    factory, demo_router, monkeypatch
+):
+    calls: list[str] = []
+    _no_llm_work(monkeypatch, calls)
+    monkeypatch.setattr(monitor, "maybe_auto_cycle", _cycle_that_approves(factory, calls))
+    _real_entries_recorded(monkeypatch, calls)
+    executed = _fills_everything(monkeypatch)
+    with factory() as db:
+        paper_broker.set_account(db, cash=1_000.0, equity=1_000.0)
+        db.commit()
+    summary = monitor.run_monitor_once(factory, demo_router)
+    assert calls.count("entries") == 2
+    assert calls.index("auto_cycle") < calls.index("entries", calls.index("auto_cycle"))
+    assert executed == ["NVDA"]
+    assert summary["executed"] == 1
+    with factory() as db:
+        hb = db.get(SystemState, "monitor_heartbeat")
+        assert hb is not None and hb.value["summary"]["executed"] == 1
+
+
+def test_entries_run_once_when_the_cycle_did_nothing(factory, demo_router, monkeypatch):
+    calls: list[str] = []
+    _no_llm_work(monkeypatch, calls)  # the auto-cycle recorder returns None
+    _real_entries_recorded(monkeypatch, calls)
+    with factory() as db:
+        paper_broker.set_account(db, cash=1_000.0, equity=1_000.0)
+        db.commit()
+    monitor.run_monitor_once(factory, demo_router)
+    assert calls.count("entries") == 1
+
+
+def test_post_cycle_entries_obey_the_regime_gate(factory, demo_router, monkeypatch):
+    calls: list[str] = []
+    _no_llm_work(monkeypatch, calls)
+    monkeypatch.setattr(monitor, "maybe_auto_cycle", _cycle_that_approves(factory, calls))
+    _real_entries_recorded(monkeypatch, calls)
+    executed = _fills_everything(monkeypatch)
+    monkeypatch.setattr(settings, "regime_throttle", 0)
+    monkeypatch.setattr(
+        monitor, "market_regime", lambda db: {"risk_on": False, "detail": "test", "date": ""}
+    )
+    with factory() as db:
+        paper_broker.set_account(db, cash=1_000.0, equity=1_000.0)
+        db.commit()
+    monitor.run_monitor_once(factory, demo_router)
+    assert "auto_cycle" in calls and "entries" not in calls
+    assert executed == []

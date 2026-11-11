@@ -113,6 +113,10 @@ def _pin_market_state(monkeypatch):
     monkeypatch.setattr(_config.settings, "universe", "demo")
     monkeypatch.setattr(_config.settings, "watchlist", "")
     monkeypatch.setattr(_config.settings, "deep_scan_enabled", False)
+    # the cycle and the event scan run only where a test turns them on;
+    # otherwise the suite would depend on the weekday and the operator's .env
+    monkeypatch.setattr(_config.settings, "auto_cycle_weekdays", "")
+    monkeypatch.setattr(_config.settings, "event_scan_weekdays", "")
     monkeypatch.setattr(monitor, "market_session_open", lambda: True)
     monkeypatch.setattr(
         monitor, "market_regime", lambda db: {"risk_on": True, "detail": "test", "date": ""}

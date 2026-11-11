@@ -1415,6 +1415,17 @@ def _run_monitor_pass(
             summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
         except Exception:
             logger.exception("auto-cycle failed")
+        if summary["auto_cycle"] is not None and session_open and regime_ok:
+            # Act on the yes: a thesis the cycle just approved is executed
+            # now, on the facts the committee judged - not on the next pass's
+            # price up to an interval later. Same gates as the first call
+            # (session open, regime; this is the not-halted branch).
+            with session_factory() as db:
+                try:
+                    summary["executed"] += execute_approved_theses(db)
+                    db.commit()
+                except Exception:
+                    logger.exception("post-cycle entries failed")
         try:
             from midas.pipeline.events import maybe_event_scan
 

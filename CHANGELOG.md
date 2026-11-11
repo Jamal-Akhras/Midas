@@ -68,6 +68,11 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- A thesis the auto-cycle approved waited for the next monitor pass, up
+  to an interval later, before its first entry attempt. The pass now runs
+  the entry executor again after the cycle, under the same session,
+  regime and halt gates, so the first attempt is made on the facts the
+  committee judged.
 - The executor refused any thesis sized under one share. On a $1,000
   account every candidate sizes below one share, so no swing trade could
   execute; the gate is now zero shares.
