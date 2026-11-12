@@ -98,6 +98,8 @@ def _pin_market_state(monkeypatch):
         "session": monitor.market_session_open,
         "day": monitor._market_open_today,
         "hours": monitor._us_market_hours,
+        "pm_time": monitor._pm_review_time_reached,
+        "minutes": monitor._minutes_since_open,
     }
     monkeypatch.setattr(monitor, "_real_market_fns", real, raising=False)
     import midas.config as _config
@@ -123,3 +125,9 @@ def _pin_market_state(monkeypatch):
     )
     monkeypatch.setattr(monitor, "_market_open_today", lambda: True)
     monkeypatch.setattr(monitor, "_us_market_hours", lambda: True)
+    monkeypatch.setattr(monitor, "_pm_review_time_reached", lambda: True)
+    # the suite's stop tests were written against a plain stop: well past
+    # the opening guard, one pass to confirm (tests/test_stop_guard.py
+    # exercises the guard itself)
+    monkeypatch.setattr(monitor, "_minutes_since_open", lambda: 120.0)
+    monkeypatch.setattr(_config.settings, "stop_confirmation_passes", 1)

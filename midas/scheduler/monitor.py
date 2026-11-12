@@ -85,8 +85,12 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
     scheduled cadence. Event triggers other than invalidation respect a
     20-hour cooldown so a standing condition reviews once a day, not once
     a pass."""
+    from midas.models import SystemState
+
     now = utcnow()
     due: list[tuple[Position, CheckpointTrigger, str]] = []
+    breach_row = db.get(SystemState, BREACH_STATE_KEY)
+    breaches: dict[str, Any] = dict(breach_row.value) if breach_row else {}
     for p in db.scalars(
         select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
     ):
@@ -106,14 +110,20 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
                 else underlying_price >= stop
             )
             if breached:
-                due.append(
-                    (
-                        p,
-                        CheckpointTrigger.invalidation,
-                        f"underlying {underlying_price} breached stop {stop}",
-                    )
+                reason = _stop_breach_verdict(db, p, thesis, underlying_price, stop, breaches)
+                if reason is not None:
+                    due.append((p, CheckpointTrigger.invalidation, reason))
+                continue  # a contested stop is the stop layer's; no LLM review meanwhile
+            if str(p.id) in breaches:
+                breaches.pop(str(p.id), None)
+                record_event(
+                    db,
+                    event_type="stop.breach_cleared",
+                    summary=f"{p.symbol}: reclaimed its stop {stop} ({underlying_price})",
+                    actor_type=ActorType.system,
+                    subject_type="position",
+                    subject_id=p.id,
                 )
-                continue
         # earnings inside the lookahead window (matters doubly for options)
         earnings_note = None if recently_reviewed else _earnings_proximity(db, p)
         if earnings_note:
@@ -134,7 +144,92 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
         # scheduled cadence
         if p.next_review_at is None or aware(p.next_review_at) <= now:
             due.append((p, CheckpointTrigger.scheduled, "scheduled re-evaluation"))
+    if breaches or breach_row is not None:
+        _upsert_state(db, BREACH_STATE_KEY, breaches)
     return due
+
+
+BREACH_STATE_KEY = "stop_breaches"
+
+
+def _minutes_since_open() -> float | None:
+    """Minutes since 09:30 New York (negative before the open); None when
+    the clock cannot be read, which the guard treats as 'past the open'."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        et = utcnow().astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        return None
+    return round((et.hour - 9) * 60 + et.minute - 30 + et.second / 60, 2)
+
+
+def _stop_breach_verdict(
+    db: Session,
+    p: Position,
+    thesis: TradeThesis,
+    price: float,
+    stop: float,
+    breaches: dict[str, Any],
+) -> str | None:
+    """A breached stop becomes an exit reason (str) or stays pending (None).
+
+    Three layers, all code: the DISASTER FLOOR (stop minus (multiple-1)
+    original risk units) exits at once at any time; inside the opening
+    guard an ordinary breach only logs; after it, the breach must hold on
+    STOP_CONFIRMATION_PASSES consecutive passes. NVDA 2026-11-12: stop
+    159.43 hit at 155.60 four minutes after the open, 162.83 twenty minutes
+    later. `breaches` is the per-position pass count, persisted in
+    system_state so a restart does not forget it."""
+    pid = str(p.id)
+    bullish = thesis.direction == Direction.bullish
+    multiple = float(settings.stop_disaster_multiple)
+    r0 = abs(p.avg_price - (thesis.stop_price or stop))
+    if multiple > 1.0 and r0 > 0:
+        floor = stop - (multiple - 1.0) * r0 if bullish else stop + (multiple - 1.0) * r0
+        if (price <= floor) if bullish else (price >= floor):
+            breaches.pop(pid, None)
+            return (
+                f"underlying {price} breached disaster floor {round(floor, 2)} "
+                f"(stop {stop}; floor = stop minus {multiple - 1.0:g} risk unit)"
+            )
+    today = utcnow().date().isoformat()
+    entry = dict(breaches.get(pid) or {})
+
+    def _note(kind: str) -> None:
+        if entry.get("noted") == today:
+            return
+        entry["noted"] = today
+        record_event(
+            db,
+            event_type="stop.breach_pending",
+            summary=f"{p.symbol}: {price} below stop {stop} - {kind}; "
+            f"disaster floor would exit at once",
+            actor_type=ActorType.system,
+            subject_type="position",
+            subject_id=p.id,
+        )
+
+    guard = int(settings.stop_opening_guard_minutes)
+    minutes = _minutes_since_open()
+    if guard > 0 and minutes is not None and minutes < guard:
+        _note(f"inside the {guard}-minute opening guard, not acted on")
+        breaches[pid] = {**entry, "count": 0}
+        return None
+    passes = max(int(settings.stop_confirmation_passes), 1)
+    count = int(entry.get("count") or 0) + 1
+    if count >= passes:
+        breaches.pop(pid, None)
+        confirmed = f" (confirmed on {count} consecutive passes)" if passes > 1 else ""
+        return f"underlying {price} breached stop {stop}{confirmed}"
+    _note(f"pass {count} of {passes} needed to confirm")
+    breaches[pid] = {
+        **entry,
+        "count": count,
+        "first_at": entry.get("first_at") or utcnow().isoformat(),
+        "price": price,
+    }
+    return None
 
 
 def _earnings_proximity(db: Session, p: Position) -> str | None:
@@ -977,18 +1072,80 @@ def apply_time_stops(db: Session) -> list[str]:
     return out
 
 
+def _pm_review_time_reached() -> bool:
+    """Is it at/after PORTFOLIO_REVIEW_AFTER_ET (New York clock) today?
+    Unparseable setting = no time gate."""
+    raw = str(settings.portfolio_review_after_et or "").strip()
+    if not raw:
+        return True
+    try:
+        hh, mm = (int(x) for x in raw.split(":", 1))
+    except ValueError:
+        return True
+    now = utcnow()
+    try:
+        from zoneinfo import ZoneInfo
+
+        et = now.astimezone(ZoneInfo("America/New_York"))
+        return (et.hour, et.minute) >= (hh, mm)
+    except Exception:
+        return (now.hour, now.minute) >= (hh + 5, mm)  # EST fallback
+
+
+# the system's own opinions about a position are not facts newer than it
+_OPINION_ARTIFACTS = frozenset({"reevaluation", "post_mortem", "portfolio_review"})
+
+
+def pm_exit_guard(db: Session, position: Position) -> str | None:
+    """Why the portfolio manager may NOT exit or trim this position now.
+    None = allowed. A position younger than PM_EXIT_MIN_AGE_HOURS can only
+    be exited on a research artifact or event flag dated after its entry:
+    the facts the committee weighed when it said trade cannot be the facts
+    that overrule it minutes later (AXP, 2026-11-12)."""
+    from midas.models import EventFlag
+
+    hours = int(settings.pm_exit_min_age_hours)
+    if hours <= 0:
+        return None
+    opened = aware(position.opened_at)
+    if utcnow() - opened >= timedelta(hours=hours):
+        return None
+    flags = db.scalars(select(EventFlag).where(EventFlag.ticker == position.ticker)).all()
+    if any(aware(f.created_at) > opened for f in flags):
+        return None
+    arts = db.scalars(
+        select(ResearchArtifact).where(ResearchArtifact.ticker == position.ticker)
+    ).all()
+    for art in arts:
+        kind = getattr(art.artifact_type, "value", art.artifact_type)
+        if str(kind) in _OPINION_ARTIFACTS:
+            continue
+        if aware(art.created_at) > opened:
+            return None
+    age_min = int((utcnow() - opened).total_seconds() // 60)
+    return (
+        f"opened {age_min} min ago and nothing newer than its entry is on record "
+        f"(no research artifact or event flag since); the committee's facts "
+        f"stand until {hours}h or new facts"
+    )
+
+
 def maybe_portfolio_review(
     session_factory: Callable[[], Session], router: ModelRouter
 ) -> dict | None:
-    """Once per day, after re-evaluations: the portfolio-manager agent
-    reviews the WHOLE book against the freshest committee research and the
-    exposure budget. Trim/exit decisions route through the autonomy ladder
-    exactly like reevaluator decisions; it cannot buy."""
+    """Once per day, at/after PORTFOLIO_REVIEW_AFTER_ET: the portfolio-
+    manager agent reviews the WHOLE book against the freshest committee
+    research and the exposure budget. Trim/exit decisions route through
+    the autonomy ladder exactly like reevaluator decisions; it cannot buy,
+    and it cannot exit a fresh position on the facts it was opened on
+    (pm_exit_guard)."""
     from midas.models import ArtifactType
     from midas.pipeline.runner import latest_artifact_for_ticker
 
     if not market_session_open():
         return None  # PM exits execute at L2: only act when fills are real
+    if not _pm_review_time_reached():
+        return None  # not on the pass that happens to find the day's first fill
     with session_factory() as db:
         positions = risk_engine.open_positions(db)
         if not positions:
@@ -1013,8 +1170,12 @@ def maybe_portfolio_review(
         deployed = risk_engine.open_notional_usd(db)
         budget = equity * risk_engine.swing_budget_pct() / 100
         book = []
+        guards: dict[str, str] = {}
         for p in positions:
             thesis = db.get(TradeThesis, p.thesis_id)
+            guard = pm_exit_guard(db, p)
+            if guard:
+                guards[p.ticker] = guard
             entry: dict[str, Any] = {
                 "ticker": p.ticker,
                 "symbol": p.symbol,
@@ -1028,6 +1189,10 @@ def maybe_portfolio_review(
                 "stop_price": thesis.stop_price if thesis else None,
                 "targets": thesis.targets if thesis else [],
                 "invalidators": thesis.invalidators if thesis else [],
+                "exit_allowed": guard is None,
+                "exit_guard": guard
+                or "exit/trim allowed: the position is old enough or facts newer than "
+                "its entry exist",
             }
             fresh: dict[str, dict] = {}
             for at in (ArtifactType.verdict, ArtifactType.bull_case, ArtifactType.bear_case):
@@ -1076,6 +1241,22 @@ def maybe_portfolio_review(
             )
             if pos is None or action.decision == "hold":
                 results[action.ticker] = action.decision
+                continue
+            guard = guards.get(pos.ticker)
+            if guard:
+                # the PM may argue; code does not act on a re-litigated verdict
+                results[action.ticker] = f"{action.decision} refused (guard: {guard})"
+                record_event(
+                    db,
+                    event_type="portfolio.action_refused",
+                    summary=f"PM wanted to {action.decision} {pos.symbol} - refused: "
+                    f"nothing newer than its entry on record ({guard[:120]})",
+                    actor_type=ActorType.system,
+                    run_id=run.id,
+                    subject_type="position",
+                    subject_id=pos.id,
+                    payload={"decision": action.decision, "reasons": action.reasons},
+                )
                 continue
             executor.propose_or_execute_exit(
                 db,
@@ -1148,6 +1329,10 @@ def _strategy_fingerprint() -> str:
             "setup_gate_max_pullback_pct",
             "setup_gate_max_5d_drop_pct",
             "setup_gate_max_volume_ratio",
+            "pm_exit_min_age_hours",
+            "stop_opening_guard_minutes",
+            "stop_confirmation_passes",
+            "stop_disaster_multiple",
         )
     }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())

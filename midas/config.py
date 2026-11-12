@@ -238,6 +238,29 @@ class Settings(BaseSettings):
     setup_gate_max_5d_drop_pct: float = 10.0
     setup_gate_max_volume_ratio: float = 1.3  # 5d/20d volume into a pullback
 
+    # --- portfolio review guard (2026-11-12) ---
+    # The PM exited AXP 24 seconds after the committee bought it, on the
+    # bear case the committee had just weighed. A position younger than
+    # this many hours is exempt from PM exits/trims unless a research
+    # artifact or event flag NEWER than its entry exists (0 = off). The
+    # daily review itself runs on the first pass at/after this New York
+    # time instead of on whichever pass first finds a position.
+    pm_exit_min_age_hours: int = 24
+    portfolio_review_after_et: str = "11:30"
+
+    # --- opening guard on stops (2026-11-12) ---
+    # NVDA's stop was hit on the opening flush and reclaimed twenty minutes
+    # later. The monitor's stop layer exits at once only through the
+    # disaster floor (stop minus (multiple-1) original risk units; 1.5 =
+    # half a risk unit below the stop); inside the first N minutes of the
+    # session an ordinary breach only logs; after that it must hold on
+    # this many consecutive passes. 0 / 1 / 1.0 restore the plain stop.
+    # A resting GTC stop at the broker (whole-share positions) is not
+    # guarded: it fires at the broker on its own.
+    stop_opening_guard_minutes: int = 30
+    stop_confirmation_passes: int = 2
+    stop_disaster_multiple: float = 1.5
+
 
 settings = Settings()
 
@@ -549,6 +572,38 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "attr": "setup_gate_max_volume_ratio",
         "type": "float",
         "group": "universe",
+        "fingerprint": True,
+    },
+    # --- portfolio review guard (2026-11-12) ---
+    "PM_EXIT_MIN_AGE_HOURS": {
+        "attr": "pm_exit_min_age_hours",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "PORTFOLIO_REVIEW_AFTER_ET": {
+        "attr": "portfolio_review_after_et",
+        "type": "str",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    # --- opening guard on stops (2026-11-12) ---
+    "STOP_OPENING_GUARD_MINUTES": {
+        "attr": "stop_opening_guard_minutes",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "STOP_CONFIRMATION_PASSES": {
+        "attr": "stop_confirmation_passes",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "STOP_DISASTER_MULTIPLE": {
+        "attr": "stop_disaster_multiple",
+        "type": "float",
+        "group": "risk",
         "fingerprint": True,
     },
 }
