@@ -112,6 +112,7 @@ def _pin_market_state(monkeypatch):
     monkeypatch.setattr(_config.settings, "paper_starting_cash", 100_000.0)
     monkeypatch.setattr(_config.settings, "daily_spend_limit_usd", 10.0)
     monkeypatch.setattr(_config.settings, "auto_cycle_max_committees", 4)
+    monkeypatch.setattr(_config.settings, "max_notional_pct_per_trade", 15.0)
     monkeypatch.setattr(_config.settings, "universe", "demo")
     monkeypatch.setattr(_config.settings, "watchlist", "")
     monkeypatch.setattr(_config.settings, "deep_scan_enabled", False)
