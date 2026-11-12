@@ -211,8 +211,10 @@ def flag_stats(db: Session) -> dict[str, Any]:
 def maybe_event_scan(
     session_factory: Callable[[], Session], router: ModelRouter
 ) -> list[dict[str, Any]] | None:
-    """On configured weekdays (EVENT_SCAN_WEEKDAYS), scan the core universe
-    plus the watchlist once per day. Empty config = manual only."""
+    """On configured weekdays (EVENT_SCAN_WEEKDAYS), scan the core universe,
+    the watchlist, every open swing position and every approved thesis once
+    per day. Empty config = manual only. (The scan once covered the ETFs
+    and the watchlist but not NVDA, the one open swing position.)"""
     days = {d.strip().lower()[:3] for d in settings.event_scan_weekdays.split(",") if d.strip()}
     if not days or utcnow().strftime("%a").lower()[:3] not in days:
         return None
@@ -226,7 +228,25 @@ def maybe_event_scan(
         else:
             row.value = {"at": utcnow().isoformat()}
         db.commit()
+    from midas.models import SWING_BOOK, Position, PositionStatus, ThesisStatus, TradeThesis
     from midas.strategy.core import core_universe
 
-    tickers = list(dict.fromkeys([*core_universe(), *settings.watchlist_tickers]))
+    with session_factory() as db:
+        held = [
+            p.ticker
+            for p in db.scalars(
+                select(Position).where(
+                    Position.status == PositionStatus.open, Position.book == SWING_BOOK
+                )
+            )
+        ]
+        approved = [
+            t.ticker
+            for t in db.scalars(
+                select(TradeThesis).where(
+                    TradeThesis.status == ThesisStatus.approved, TradeThesis.book == SWING_BOOK
+                )
+            )
+        ]
+    tickers = list(dict.fromkeys([*core_universe(), *settings.watchlist_tickers, *held, *approved]))
     return run_event_scan(session_factory, router, tickers)

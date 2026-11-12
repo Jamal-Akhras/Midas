@@ -19,7 +19,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +28,7 @@ from midas.agents.defs import AGENT_DEFS
 from midas.audit import record_event
 from midas.config import settings
 from midas.models import (
+    SWING_BOOK,
     ActorType,
     ApprovalRequest,
     ArtifactType,
@@ -37,6 +38,8 @@ from midas.models import (
     OptionStructure,
     OptionType,
     PipelineRun,
+    Position,
+    PositionStatus,
     ResearchArtifact,
     RunKind,
     RunStatus,
@@ -141,6 +144,85 @@ def todays_screen_record(db: Session, ticker: str, today: date | None = None) ->
     return None
 
 
+RECENT_EXIT_DAYS = 10
+
+
+def recent_exit(db: Session, ticker: str, days: int = RECENT_EXIT_DAYS) -> dict | None:
+    """The last swing exit in this ticker inside `days`, as the committee
+    should see it before re-entering: when, at what price, how it ended and
+    why. A stopped-out name stays eligible for the screen; a committee that
+    buys the bounce must at least know it is buying the bounce."""
+    from midas.models import AuditEvent, Order, OrderSide, OrderStatus, TradeOutcome
+
+    since = utcnow() - timedelta(days=days)
+    p = db.scalar(
+        select(Position)
+        .where(
+            Position.ticker == ticker.upper(),
+            Position.book == SWING_BOOK,
+            Position.status == PositionStatus.closed,
+            Position.closed_at.is_not(None),
+        )
+        .order_by(Position.closed_at.desc())
+    )
+    if p is None or p.closed_at is None or aware(p.closed_at) < since:
+        return None
+    sell = db.scalar(
+        select(Order)
+        .where(
+            Order.position_id == p.id,
+            Order.side == OrderSide.sell,
+            Order.status == OrderStatus.filled,
+        )
+        .order_by(Order.created_at.desc())
+    )
+    outcome = db.scalar(select(TradeOutcome).where(TradeOutcome.position_id == p.id))
+    exit_price = float(sell.filled_price) if sell is not None and sell.filled_price else None
+    if outcome is not None:
+        pnl_pct: float | None = round(float(outcome.pnl_pct), 2)
+        exit_kind = str(outcome.exit_kind)
+    else:
+        pnl_pct = (
+            round((exit_price / p.avg_price - 1) * 100, 2) if exit_price and p.avg_price else None
+        )
+        exit_kind = "unknown"
+    why = db.scalar(
+        select(AuditEvent)
+        .where(
+            AuditEvent.subject_id == p.id,
+            AuditEvent.event_type.in_(
+                ["stop.breach_exit", "stop.time", "portfolio.action", "position.reviewed"]
+            ),
+        )
+        .order_by(AuditEvent.created_at.desc())
+    )
+    return {
+        "closed_at": str(p.closed_at),
+        "days_ago": (utcnow() - aware(p.closed_at)).days,
+        "entry": p.avg_price,
+        "exit_price": exit_price,
+        "pnl_pct": pnl_pct,
+        "exit_kind": exit_kind,
+        "reason": why.summary if why is not None else "",
+    }
+
+
+def recent_exit_note(exit_: dict | None) -> str:
+    if exit_ is None:
+        return f"no swing exit in this ticker in the last {RECENT_EXIT_DAYS} days"
+    kind = {"stop": "stopped out", "time": "time-stopped", "target": "took profit"}.get(
+        str(exit_["exit_kind"]), f"exited ({exit_['exit_kind']})"
+    )
+    price = f" at {exit_['exit_price']:g}" if exit_.get("exit_price") else ""
+    pnl = f" ({exit_['pnl_pct']:+.1f}%)" if exit_.get("pnl_pct") is not None else ""
+    why = f": {exit_['reason']}" if exit_.get("reason") else ""
+    return (
+        f"RECENT EXIT: {kind} {exit_['days_ago']} day(s) ago{price}{pnl} after entering at "
+        f"{exit_['entry']:g}{why}. A re-entry needs a reason the last exit did not have; "
+        "the same setup label a day later is not one."
+    )
+
+
 def screen_context_content(
     db: Session, ticker: str, bars: list[dict], bars_error: str = ""
 ) -> dict:
@@ -148,6 +230,7 @@ def screen_context_content(
     block. Fenced into triage, bull, bear and the investor."""
     screen = todays_screen_record(db, ticker)
     tech = technical_block(bars) if bars else None
+    exit_ = recent_exit(db, ticker)
     if screen is None:
         screen_note = (
             "no screen record for today (manual run, or the ticker was not on today's "
@@ -188,6 +271,8 @@ def screen_context_content(
         "technical_note": technical_note,
         "gate": {"passed": not failures, "failures": failures, "evaluated": tech is not None},
         "gate_note": gate_note,
+        "recent_exit": exit_,
+        "recent_exit_note": recent_exit_note(exit_),
         "deterministic": True,
     }
 
