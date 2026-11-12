@@ -10,10 +10,42 @@ once with the live quote; a second failure ends the run with no thesis.
 from __future__ import annotations
 
 from midas.agents.schemas import VerdictOutput
+from midas.config import settings
 
 ENTRY_BAND_PCT = 15.0  # entry-zone midpoint must be within this of the live quote
 STOP_MIN_PCT = 2.0  # a stop closer than this is noise, not a thesis
 STOP_MAX_PCT = 25.0  # a stop further than this is not risk management
+
+
+def reward_to_risk(entry: float, stop: float, target: float) -> float | None:
+    """First-target reward over stop-distance risk, from the worst accepted
+    fill; None when the levels do not describe a trade (zero/negative risk)."""
+    risk = abs(entry - stop)
+    if risk <= 0:
+        return None
+    return abs(target - entry) / risk
+
+
+def _reward_to_risk_problem(verdict: VerdictOutput, reference: float, stop: float) -> str | None:
+    """AXP 2026-11-12: stop 6.0% below entry, first target 3.8% above - 0.6
+    to 1 - and nothing in code objected. Shares only: options are sized by
+    premium, which is their risk."""
+    floor = float(settings.min_reward_to_risk)
+    if floor <= 0 or verdict.instrument != "shares":
+        return None
+    if not verdict.targets:
+        return (
+            f"a trade verdict needs a first target to check reward-to-risk (minimum {floor:g} to 1)"
+        )
+    target = float(verdict.targets[0])
+    rr = reward_to_risk(reference, stop, target)
+    if rr is None or rr >= floor:
+        return None
+    return (
+        f"reward-to-risk is {rr:.2f} to 1 (first target {target:g} vs stop {stop:g} from "
+        f"entry {reference:g}; minimum {floor:g}) - put the stop at the structural level "
+        f"(the pullback low or just under the 50-day) or raise the target, or rule no_trade"
+    )
 
 
 def problems(verdict: VerdictOutput, spot: float) -> list[str]:
@@ -51,6 +83,10 @@ def problems(verdict: VerdictOutput, spot: float) -> list[str]:
         bad_targets = [t for t in verdict.targets if float(t) <= hi]
         if bad_targets:
             out.append(f"targets {bad_targets} are not above the entry zone")
+        elif stop < lo:
+            rr_problem = _reward_to_risk_problem(verdict, reference, stop)
+            if rr_problem:
+                out.append(rr_problem)
     else:
         reference = lo  # the worst fill a bear accepts
         if stop <= hi:
@@ -64,4 +100,8 @@ def problems(verdict: VerdictOutput, spot: float) -> list[str]:
         bad_targets = [t for t in verdict.targets if float(t) >= lo]
         if bad_targets:
             out.append(f"targets {bad_targets} are not below the entry zone")
+        elif stop > hi:
+            rr_problem = _reward_to_risk_problem(verdict, reference, stop)
+            if rr_problem:
+                out.append(rr_problem)
     return out

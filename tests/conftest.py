@@ -131,3 +131,6 @@ def _pin_market_state(monkeypatch):
     # exercises the guard itself)
     monkeypatch.setattr(monitor, "_minutes_since_open", lambda: 120.0)
     monkeypatch.setattr(_config.settings, "stop_confirmation_passes", 1)
+    # likewise the suite's fixtures carry 1.1-1.3:1 trades written before the
+    # reward-to-risk floor existed (tests/test_reward_to_risk.py turns it on)
+    monkeypatch.setattr(_config.settings, "min_reward_to_risk", 0.0)

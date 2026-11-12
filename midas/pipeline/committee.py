@@ -679,8 +679,9 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                     "YOUR PREVIOUS VERDICT WAS REJECTED by the deterministic sanity gate: "
                     + "; ".join(issues)
                     + f". The live quote is ${live:.2f}. Entry zone within 15% of it, stop "
-                    "2-25% beyond the entry on the thesis side, targets beyond the entry. "
-                    "Fix the levels or rule no_trade."
+                    "2-25% beyond the entry on the thesis side, targets beyond the entry, "
+                    f"first target at least {settings.min_reward_to_risk:g}x the stop "
+                    "distance from the entry. Fix the levels or rule no_trade."
                 ),
                 force_new_version=True,
             )

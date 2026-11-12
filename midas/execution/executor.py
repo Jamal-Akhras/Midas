@@ -139,6 +139,7 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
             entry_price=thesis.entry_zone_high,
             stop_price=thesis.stop_price,
             sector=sector,
+            first_target=(float(thesis.targets[0]) if thesis.targets else None),
         )
         # the engine already floors the size at MIN_SWING_NOTIONAL_USD; a
         # fraction of a share is a valid size (FRACTIONAL_SHARES)

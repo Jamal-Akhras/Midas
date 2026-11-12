@@ -261,6 +261,13 @@ class Settings(BaseSettings):
     stop_confirmation_passes: int = 2
     stop_disaster_multiple: float = 1.5
 
+    # --- reward-to-risk floor (2026-11-12) ---
+    # AXP: stop 6% away, first target 3.8% away, nothing objected. A shares
+    # verdict's first target must be at least this many stop distances from
+    # the worst accepted entry (the sanity gate re-prompts once; the
+    # executor re-checks). Options are sized by premium and skip it. 0 = off.
+    min_reward_to_risk: float = 1.5
+
 
 settings = Settings()
 
@@ -602,6 +609,12 @@ EDITABLE_SETTINGS: dict[str, dict] = {
     },
     "STOP_DISASTER_MULTIPLE": {
         "attr": "stop_disaster_multiple",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "MIN_REWARD_TO_RISK": {
+        "attr": "min_reward_to_risk",
         "type": "float",
         "group": "risk",
         "fingerprint": True,

@@ -1333,6 +1333,7 @@ def _strategy_fingerprint() -> str:
             "stop_opening_guard_minutes",
             "stop_confirmation_passes",
             "stop_disaster_multiple",
+            "min_reward_to_risk",
         )
     }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())

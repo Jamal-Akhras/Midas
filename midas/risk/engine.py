@@ -227,9 +227,12 @@ def check_shares_trade(
     entry_price: float,
     stop_price: float,
     sector: str = "",
+    first_target: float | None = None,
 ) -> RiskCheck:
     """Size a stock position: risk (entry-stop) per share against the
-    per-trade risk cap; then portfolio-level caps."""
+    per-trade risk cap; then portfolio-level caps. With a first target the
+    reward-to-risk floor is checked too (the committee's provisional sizing
+    has none; the executor passes the thesis's)."""
     checks: dict[str, dict] = {}
     ok = True
 
@@ -250,6 +253,17 @@ def check_shares_trade(
         "> 0",
         "long-only book: stop must be below entry",
     )
+    floor = float(settings.min_reward_to_risk)
+    if first_target is not None and floor > 0 and risk_per_share > 0:
+        rr = (float(first_target) - entry_price) / risk_per_share
+        ok &= _check(
+            checks,
+            "reward_to_risk",
+            rr >= floor,
+            f"{rr:.2f}:1",
+            f">= {floor:g}:1",
+            "first target vs stop distance; a thin trade is not evidence",
+        )
     ok &= _check(checks, "positive_equity", account_equity > 0, account_equity, "> 0")
     ok = bool(ok) and ok  # normalize
     throttle = regime_throttle(db)

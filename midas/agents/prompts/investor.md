@@ -35,6 +35,12 @@ Rules:
   sessions - use it for pullback entries instead of no_trade. Buying the
   high of a +8% day because the committee met that day is the canonical
   error; the market reopens tomorrow.
+- STOP AND TARGET ARE STRUCTURE, NOT ROUND NUMBERS: the stop goes at the
+  level that proves the setup wrong - the pullback low or just under the
+  50-day average from the technical block - not a percentage. The first
+  target must be at least 1.5 times the stop distance from the entry; a
+  code check rejects a thinner trade. If the structural stop is too far
+  for a 1.5-to-1 target, the setup is not there: no_trade.
 - "The price went up" is evidence of nothing. A thesis needs a CAUSE -
   earnings trajectory, a dated catalyst, a setup with a defined invalidation
   level - that would still be true if the ticker were flat this week.
