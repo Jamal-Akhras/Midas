@@ -98,12 +98,16 @@ Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 | Catalysts | Catalyst/News Agent | LLM + news/earnings tools |
 | "Passable?" gate | code floors + cheap-model triage | mixed |
 | Bull case / Bear case | two agents, **different providers, asserted at run time** | LLM |
+| Evidence audit | code | deterministic: counts each side's evidence items that name their artifact |
 | Option structure | code generates candidates -> LLM assist picks -> code re-validates | mixed |
 | Risk & sizing | risk engine | **deterministic code only** |
 | Verdict | Investor Agent (risk check is binding) | LLM, high-tier models |
-| Verdict sanity | code: entry zone, stop and targets against the live quote | deterministic |
+| Verdict sanity | code: entry zone, stop, targets and reward-to-risk against the live quote | deterministic |
 | Execution | paper broker + execution-time risk re-check | code |
-| Re-evaluation | Investor Agent on schedule + events (invalidation hit, earnings within 7 days, DTE decay) | LLM + tools |
+| Stop layer | code: disaster floor at once; ordinary breaches wait out the opening guard and need consecutive passes | deterministic |
+| Premarket gap review | Investor Agent, premarket, with news: hold, exit at the open, or raise the stop | LLM, bounded by code |
+| Re-evaluation | Investor Agent on schedule + events (earnings within 7 days, DTE decay) | LLM + tools |
+| Portfolio review | Portfolio Manager Agent at a fixed time; cannot exit a fresh position on the facts it was opened on | LLM, guarded by code |
 | Outcome scoring | code, graded by the market | deterministic |
 | Event flags | Event Analyst: news and filings into sourced flags, scored against forward returns | LLM + tools, then code |
 
@@ -167,6 +171,9 @@ each report.
 positions on one line, only the sections with content, and the review
 only when something needs attention. The scheduler sends full briefs at
 09:00 and 19:05 local and compact ones hourly until the close.
+Between briefs, each monitor pass ends with one short push listing that
+pass's fills, stop exits, gap flags, portfolio-manager actions, approvals
+and halts (`TELEGRAM_PUSH_EVENTS`); a quiet pass sends nothing.
 
 ## Risk rules (enforced in code, twice)
 
@@ -178,6 +185,15 @@ AI spend ceiling. All checks run at recommendation time and AGAIN at
 execution time; the execution-time result is stored on the order. The core
 book has its own cap (its allocation) and is invisible to the swing caps,
 stops, time stops, reviews and statistics.
+
+A shares verdict needs a first target at least `MIN_REWARD_TO_RISK` stop
+distances from the entry. Stop-breach exits are code with an opening
+guard: a breach past the disaster floor exits at once; an ordinary breach
+in the first `STOP_OPENING_GUARD_MINUTES` only logs, and after that it must
+hold on `STOP_CONFIRMATION_PASSES` consecutive passes. A model may raise a
+stop, never cut it. The portfolio manager cannot exit a position younger
+than `PM_EXIT_MIN_AGE_HOURS` unless a research artifact or event flag newer
+than its entry exists.
 
 ## Research
 

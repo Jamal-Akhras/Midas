@@ -9,7 +9,6 @@ shown exactly that and said "Alerts: none")."""
 
 from datetime import timedelta
 
-import pytest
 from sqlalchemy import select
 
 from midas.audit import record_event
@@ -170,6 +169,8 @@ def test_monitor_pass_pushes_its_stop_exit(factory, demo_router, monkeypatch):
 
 def test_push_can_be_switched_off(factory, monkeypatch):
     calls = _sent(monkeypatch)
+    monkeypatch.setattr(settings, "core_enabled", False)  # the live .env must not reach the test
+    monkeypatch.setattr(settings, "regime_filter_enabled", False)
     monkeypatch.setattr(settings, "telegram_push_events", False)
     monkeypatch.setattr(settings, "telegram_bot_token", "test-token")
     monkeypatch.setattr(settings, "telegram_chat_id", "42")

@@ -7,6 +7,40 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- An opening guard on stop-breach exits: the monitor's stop layer exits at
+  once only through a disaster floor (`STOP_DISASTER_MULTIPLE` original
+  risk units below entry), logs rather than acts inside
+  `STOP_OPENING_GUARD_MINUTES`, and otherwise needs the breach on
+  `STOP_CONFIRMATION_PASSES` consecutive passes. The count survives a
+  restart (`stop_breaches` in system state); reclaiming the stop is audited.
+- A premarket gap review: a held ticker gapping past
+  `PREMARKET_GAP_ALERT_PCT` is reviewed by the reevaluator in that same
+  premarket pass, with the news tool and the gap facts. It may hold under
+  the guard, exit on the first in-session pass (before entries and the
+  stop layer), or raise the stop via `new_stop`; a cut is refused.
+- A portfolio-review guard: a position younger than
+  `PM_EXIT_MIN_AGE_HOURS` is exempt from PM exits and trims unless a
+  research artifact or event flag newer than its entry exists; refused
+  actions are audited as `portfolio.action_refused`. The daily review runs
+  at/after `PORTFOLIO_REVIEW_AFTER_ET` instead of on whichever pass first
+  finds a position.
+- A reward-to-risk floor (`MIN_REWARD_TO_RISK`): a shares verdict's first
+  target must be at least that many stop distances from the worst
+  accepted entry. The sanity gate re-prompts once; the risk engine and the
+  executor re-check it.
+- An evidence audit: bull and bear write each evidence item as
+  `artifact: claim (date)`; code counts the items that name an artifact
+  and the investor is told the count per side.
+- The screen context carries the ticker's last swing exit inside ten days
+  (when, price, outcome, why) as a hard line for a committee re-entering
+  a stopped-out name.
+- The post-mortem receives the whole record: daily bars from the session
+  before entry to the exit, the filled orders, every audit event on the
+  position or its thesis, and every review checkpoint.
+- Real-time pushes (`TELEGRAM_PUSH_EVENTS`): each monitor pass ends with
+  one Telegram message listing its fills, stop exits, gap flags, PM
+  actions, approvals and halts. The brief flags a swing position marked
+  below its stop.
 - A setup gate: after the price/volume floors, each screen candidate's
   setup label is checked in code against the technical block (above the
   50-day average, within `SETUP_GATE_MAX_PULLBACK_PCT` of the 20-day
@@ -66,6 +100,15 @@ not yet cut a release, so everything sits under Unreleased.
   `cost.divergence` audit event when they disagree; `docs/tollgate.md`.
 
 ### Changed
+- The catalyst prompt admits only dated scheduled events and disclosed
+  corporate actions; analyst notes, reiterations and the price move itself
+  are not catalysts. The investor places the stop at the structural level
+  (the pullback low or just under the 50-day), not a percentage. The
+  portfolio manager is told an invalidator triggers only on a fact dated
+  after the entry. The post-mortem must say "cause not in the record"
+  rather than name an event the record does not contain.
+- The event scan covers every open swing position and approved thesis as
+  well as the core universe and the watchlist.
 - The risk check reports a bull/bear conviction tie as a tie instead of a
   bull win. The investor, triage, bull and bear prompts state that analyst
   ratings, price targets and headline counts are opinion, not evidence

@@ -47,6 +47,13 @@ def _l2(monkeypatch):
     monkeypatch.setattr(settings, "stop_disaster_multiple", 1.5)
     monkeypatch.setattr(settings, "stop_opening_guard_minutes", 30)
     monkeypatch.setattr(monitor, "maybe_portfolio_review", lambda f, r: None)
+    # a closed position's post-mortem reads daily bars: keep that off the network
+    import midas.tools.market_data as md
+    from midas.tools.base import ToolResult
+
+    monkeypatch.setattr(
+        md, "get_daily_bars", lambda ticker, days=60: ToolResult(data=[], source="t")
+    )
 
 
 def _quote(monkeypatch, *, price, prev_close):
