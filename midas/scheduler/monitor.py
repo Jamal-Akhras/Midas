@@ -733,7 +733,14 @@ def run_post_mortems(
                         "holding_days": outcome.holding_days,
                         "exit_kind": outcome.exit_kind,
                     },
-                }
+                    **_position_record(db, position, thesis),
+                    "record_note": (
+                        "this is the whole record. If it does not say why the price "
+                        "moved, the cause is not in the record - say so; never name an "
+                        "earnings result, headline or event that is not written above."
+                    ),
+                },
+                limit=12000,
             )
             try:
                 _, pm = run_agent_stage(
@@ -751,6 +758,69 @@ def run_post_mortems(
                 run.status = RunStatus.failed
             db.commit()
     return lessons
+
+
+def _position_record(db: Session, position: Position, thesis: TradeThesis) -> dict[str, Any]:
+    """Everything the ledger knows about one closed position, for the
+    post-mortem: the daily bars from the session before entry to the exit,
+    the orders, every audit event on the position or its thesis, and every
+    review checkpoint. NVDA 2026-11-12: given only thesis+P&L, the post-
+    mortem invented a 'negative earnings surprise' five days before the
+    earnings date."""
+    from midas.models import AuditEvent, Order
+
+    opened = aware(position.opened_at)
+    closed = aware(position.closed_at) if position.closed_at else utcnow()
+    path: list[dict[str, Any]] | str
+    try:
+        from midas.tools.market_data import get_daily_bars
+
+        span = max((closed - opened).days + 5, 10)
+        first = (opened - timedelta(days=1)).date().isoformat()
+        last = closed.date().isoformat()
+        path = [
+            {k: b.get(k) for k in ("date", "open", "high", "low", "close", "volume")}
+            for b in get_daily_bars(position.ticker, days=min(span, 250)).data
+            if first <= str(b.get("date", ""))[:10] <= last
+        ]
+    except Exception:
+        path = "price path unavailable (bars feed failed)"
+    orders = [
+        {
+            "side": o.side.value,
+            "qty": o.qty,
+            "filled_price": o.filled_price,
+            "filled_at": str(o.filled_at),
+            "reason": o.reason.value,
+        }
+        for o in db.scalars(
+            select(Order)
+            .where(Order.position_id == position.id, Order.status == OrderStatus.filled)
+            .order_by(Order.created_at)
+        )
+    ]
+    events = [
+        {"at": str(e.created_at), "type": e.event_type, "summary": e.summary}
+        for e in db.scalars(
+            select(AuditEvent)
+            .where(AuditEvent.subject_id.in_([position.id, thesis.id]))
+            .order_by(AuditEvent.created_at)
+        )
+    ][-25:]
+    reviews = [
+        {
+            "at": str(c.created_at),
+            "trigger": getattr(c.trigger, "value", str(c.trigger)),
+            "decision": c.decision,
+            "notes": c.notes,
+        }
+        for c in db.scalars(
+            select(ReviewCheckpoint)
+            .where(ReviewCheckpoint.position_id == position.id)
+            .order_by(ReviewCheckpoint.created_at)
+        )
+    ]
+    return {"price_path": path, "orders": orders, "events": events, "reviews": reviews}
 
 
 def recent_lessons(db: Session, limit: int = 5) -> list[str]:

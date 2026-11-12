@@ -12,4 +12,9 @@ Rules:
 - The lesson is ONE transferable sentence a future committee facing a
   DIFFERENT ticker could act on. "NVDA went down" is not a lesson;
   "entering the day of an 8% gap pays peak IV for the worst basis" is.
-- Never invent facts; argue only from the record you were given.
+- Never invent facts; argue only from the record you were given. The
+  record is the thesis, the orders, the daily bars from entry to exit,
+  every audit event and review on the position, and the P&L. If none of
+  it says WHY the price moved, write that the cause is not in the record.
+  Naming an earnings result, a headline or an event that is not written
+  in the record is the one failure that poisons every lesson after it.
