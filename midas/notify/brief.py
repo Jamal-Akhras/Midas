@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from midas.config import settings
 from midas.models import (
+    SWING_BOOK,
     ApprovalRequest,
     ApprovalStatus,
     AuditEvent,
@@ -169,9 +170,17 @@ def build_brief(
     open_rows = db.scalars(
         select(Position).where(Position.status == PositionStatus.open).order_by(Position.symbol)
     )
+    below_stop: list[str] = []
     for p in open_rows:
         mark = p.last_mark_price or p.avg_price
         multiplier = 100 if p.instrument == Instrument.option else 1
+        if p.book == SWING_BOOK and p.stop_price and mark < p.stop_price:
+            # NVDA 2026-11-12: the 09:00 brief showed a mark under the stop
+            # and said "Alerts: none"
+            below_stop.append(
+                f"{p.symbol} is marked below its stop ({mark:.2f} vs {p.stop_price:.2f}) "
+                "on the latest print - the stop layer decides at the open"
+            )
         positions.append(
             {
                 "symbol": p.symbol,
@@ -185,7 +194,7 @@ def build_brief(
 
     decisions: list[str] = []
     trades: list[str] = []
-    alerts: list[str] = []
+    alerts: list[str] = list(below_stop)
     events = db.scalars(
         select(AuditEvent).where(AuditEvent.created_at >= since).order_by(AuditEvent.created_at)
     )

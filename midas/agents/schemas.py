@@ -327,6 +327,8 @@ class ReevaluationOutput(BaseModel):
     thesis_still_valid: bool
     time_pressure_note: str = ""  # required thinking for options as DTE decays
     next_review_days: int = Field(gt=0, default=1)
+    # a HIGHER stop on the underlying; code accepts a raise only, never a cut
+    new_stop: float | None = None
 
     @model_validator(mode="after")
     def _valid_decision(self) -> "ReevaluationOutput":

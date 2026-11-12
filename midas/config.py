@@ -268,6 +268,11 @@ class Settings(BaseSettings):
     # executor re-checks). Options are sized by premium and skip it. 0 = off.
     min_reward_to_risk: float = 1.5
 
+    # --- real-time pushes (2026-11-12) ---
+    # Fills, stop exits, gap flags, PM actions, halts: one Telegram message
+    # at the end of the pass that produced them (the brief stays the digest).
+    telegram_push_events: bool = True
+
 
 settings = Settings()
 
@@ -618,6 +623,12 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "type": "float",
         "group": "risk",
         "fingerprint": True,
+    },
+    "TELEGRAM_PUSH_EVENTS": {
+        "attr": "telegram_push_events",
+        "type": "bool",
+        "group": "ops",
+        "fingerprint": False,
     },
 }
 

@@ -39,6 +39,7 @@ from midas.models import (
     ReviewCheckpoint,
     RunKind,
     RunStatus,
+    SystemState,
     ThesisStatus,
     TradeThesis,
     aware,
@@ -323,15 +324,25 @@ def execute_stop_exit(session_factory: Callable[[], Session], position_id, reaso
         return "exit"
 
 
+OPEN_EXITS_KEY = "open_exits"
+GAP_REVIEWS_KEY = "gap_reviews"
+
+
 def reevaluate_position(
     session_factory: Callable[[], Session],
     router: ModelRouter,
     position_id,
     trigger: CheckpointTrigger,
     reason: str,
+    *,
+    defer_exit_to_open: bool = False,
+    extra_task: str = "",
 ) -> str:
     """Run the re-evaluation agent for one position and route its decision
-    through the autonomy ladder. Returns the decision."""
+    through the autonomy ladder. Returns the decision. With
+    `defer_exit_to_open` (the premarket gap review) an exit/trim is parked
+    in system_state and executed on the first pass after the open; a
+    `new_stop` is applied only when it RAISES the stop."""
     with session_factory() as db:
         position = db.get(Position, position_id)
         assert position is not None, f"review of unknown position {position_id}"
@@ -382,7 +393,7 @@ def reevaluate_position(
             task_text=(
                 "Re-evaluate this OPEN position against its thesis.\n\n"
                 f"Original thesis:\n{thesis_block}\n\n"
-                f"Position:\n{position_block}"
+                f"Position:\n{position_block}" + (f"\n\n{extra_task}" if extra_task else "")
             ),
             ticker=position.ticker,
         )
@@ -402,16 +413,149 @@ def reevaluate_position(
             subject_id=position.id,
             payload={"decision": reeval.decision, "reasons": reeval.reasons},
         )
+        if reeval.new_stop is not None:
+            _apply_stop_change(db, position, thesis, float(reeval.new_stop))
         if reeval.decision in ("exit", "trim", "roll"):
+            if defer_exit_to_open:
+                row = db.get(SystemState, OPEN_EXITS_KEY)
+                parked = dict(row.value) if row else {}
+                parked[str(position.id)] = {
+                    "decision": reeval.decision,
+                    "reasons": list(reeval.reasons),
+                    "artifact_id": str(artifact.id),
+                    "at": utcnow().isoformat(),
+                }
+                _upsert_state(db, OPEN_EXITS_KEY, parked)
+                record_event(
+                    db,
+                    event_type="position.exit_at_open",
+                    summary=f"{position.symbol}: gap review says {reeval.decision} - "
+                    "executed on the first pass after the open, before anything else",
+                    actor_type=ActorType.agent,
+                    run_id=run.id,
+                    subject_type="position",
+                    subject_id=position.id,
+                    payload={"reasons": reeval.reasons},
+                )
+            else:
+                executor.propose_or_execute_exit(
+                    db,
+                    position,
+                    decision=reeval.decision,
+                    reasons=reeval.reasons,
+                    artifact_id=artifact.id,
+                )
+        db.commit()
+        return reeval.decision
+
+
+def _apply_stop_change(
+    db: Session, position: Position, thesis: TradeThesis, new_stop: float
+) -> None:
+    """A model may raise a stop, never cut it, and never rest it at/above
+    the market (the breach path owns that)."""
+    current = float(position.stop_price or thesis.stop_price or 0.0)
+    mark = float(position.last_mark_price or 0.0)
+    bullish = thesis.direction == Direction.bullish
+    better = new_stop > current if bullish else (new_stop < current if current else False)
+    inside = (new_stop < mark) if bullish else (new_stop > mark) if mark else True
+    if better and inside:
+        position.stop_price = round(new_stop, 2)
+        record_event(
+            db,
+            event_type="stop.tightened",
+            summary=f"{position.symbol}: stop {current} -> {position.stop_price} (model raised it)",
+            actor_type=ActorType.agent,
+            subject_type="position",
+            subject_id=position.id,
+        )
+        return
+    record_event(
+        db,
+        event_type="stop.change_refused",
+        summary=f"{position.symbol}: model asked for stop {new_stop} vs current {current} "
+        f"(mark {mark}) - a stop may be raised, never cut or rested at the market",
+        actor_type=ActorType.system,
+        subject_type="position",
+        subject_id=position.id,
+    )
+
+
+def execute_open_exits(db: Session) -> list[str]:
+    """Exits the premarket gap review parked for the open: run on the first
+    in-session pass, before entries and before anything an LLM touches."""
+    row = db.get(SystemState, OPEN_EXITS_KEY)
+    parked = dict(row.value) if row else {}
+    if not parked:
+        return []
+    import uuid as _uuid
+
+    done: list[str] = []
+    for pid, info in list(parked.items()):
+        try:
+            position = db.get(Position, _uuid.UUID(str(pid)))
+        except ValueError:
+            position = None
+        if position is None or position.status != PositionStatus.open:
+            parked.pop(pid, None)
+            continue
+        try:
             executor.propose_or_execute_exit(
                 db,
                 position,
-                decision=reeval.decision,
-                reasons=reeval.reasons,
-                artifact_id=artifact.id,
+                decision=str(info.get("decision") or "exit"),
+                reasons=[*(info.get("reasons") or []), "premarket gap review: exit at the open"],
             )
-        db.commit()
-        return reeval.decision
+            done.append(position.symbol)
+            parked.pop(pid, None)
+        except Exception:
+            logger.exception("exit at open failed for %s", position.symbol)
+            db.rollback()
+            parked = dict(row.value) if (row := db.get(SystemState, OPEN_EXITS_KEY)) else {}
+            parked.pop(pid, None)  # one failed exit is retried by the stop layer, not forever
+    _upsert_state(db, OPEN_EXITS_KEY, parked)
+    db.flush()
+    return done
+
+
+def gap_review(
+    session_factory: Callable[[], Session], router: ModelRouter, flag: dict[str, Any]
+) -> str:
+    """The premarket gap review: the reevaluator, with news, right now -
+    not at the open, where the stop layer has already spoken. Bounded in
+    one direction: it may exit at the open or raise the stop; it cannot
+    lower the stop or move the disaster floor (both stay code)."""
+    with session_factory() as db:
+        position = db.get(Position, flag["position_id"])
+        if position is None or position.status != PositionStatus.open:
+            return "already closed"
+        thesis = db.get(TradeThesis, position.thesis_id)
+        stop = float(position.stop_price or (thesis.stop_price if thesis else 0) or 0)
+        r0 = abs(position.avg_price - float((thesis.stop_price if thesis else 0) or stop))
+        multiple = float(settings.stop_disaster_multiple)
+        floor = round(stop - (multiple - 1.0) * r0, 2) if multiple > 1 and r0 > 0 else stop
+        earnings = _earnings_proximity(db, position) or "no earnings inside the window on record"
+        guard = int(settings.stop_opening_guard_minutes)
+    reason = (
+        f"premarket gap {flag['gap_pct']:+.1f}%: prev close {flag['prev_close']}, "
+        f"premarket {flag['price']}, stop {stop}, disaster floor {floor}, {earnings}"
+    )
+    task = (
+        "PREMARKET GAP REVIEW. The market is closed; nothing fills now. Choices: "
+        f"hold (the stop {stop} applies at the open under a {guard}-minute opening guard; "
+        f"the disaster floor {floor} exits at once), exit (sold on the first pass after "
+        "the open, before anything else), or hold with a HIGHER new_stop (code accepts a "
+        "raise below the premarket price only). Use get_news for the overnight story."
+    )
+    return reevaluate_position(
+        session_factory,
+        router,
+        flag["position_id"],
+        CheckpointTrigger.scheduled,
+        reason,
+        defer_exit_to_open=True,
+        extra_task=task,
+    )
 
 
 def execute_approved_theses(db: Session) -> int:
@@ -988,23 +1132,27 @@ def _premarket_now() -> bool:
         return 10 <= now.hour < 14
 
 
-def premarket_gap_sweep(db: Session) -> list[str]:
+def premarket_gap_sweep(db: Session) -> list[dict[str, Any]]:
     """Weekend/overnight news shows up as a premarket gap. We never TRADE
     premarket (thin, unmirrorable fills) - but a held ticker gapping hard
-    gets flagged so its review fires on the FIRST pass after the open."""
+    is flagged, once per day, and the pass runs its gap review right then
+    (gap_review), while the news is readable and before the opening print
+    decides for us. Returns the flags with the facts the review needs."""
     if settings.premarket_gap_alert_pct <= 0 or not _premarket_now():
         return []
     from midas.tools.base import ToolContext
     from midas.tools.registry import TOOLS
 
-    flagged: list[str] = []
-    now = utcnow()
+    today = utcnow().date().isoformat()
+    row = db.get(SystemState, GAP_REVIEWS_KEY)
+    reviewed = {k: v for k, v in (dict(row.value) if row else {}).items() if v == today}
+    flagged: list[dict[str, Any]] = []
     for p in db.scalars(
         select(Position).where(Position.status == PositionStatus.open, Position.book == SWING_BOOK)
     ):
         ticker = p.ticker
-        if p.next_review_at is not None and aware(p.next_review_at) <= now:
-            continue  # already due
+        if str(p.id) in reviewed:
+            continue  # one gap review per position per day
         try:
             execute = ToolContext(db, ticker=ticker).executor(TOOLS)
             q = execute("get_quote", {"ticker": ticker})["data"]
@@ -1017,18 +1165,32 @@ def premarket_gap_sweep(db: Session) -> list[str]:
             continue
         gap_pct = (price - prev) / prev * 100
         if abs(gap_pct) >= settings.premarket_gap_alert_pct:
-            p.next_review_at = now  # due on the first open-session pass
             record_event(
                 db,
                 event_type="premarket.gap_flagged",
                 summary=f"{p.symbol}: premarket {gap_pct:+.1f}% vs prev close "
-                f"- review scheduled for the open",
+                f"({prev} -> {price}) - gap review now",
                 actor_type=ActorType.system,
                 subject_type="position",
                 subject_id=p.id,
             )
-            flagged.append(ticker)
-    _upsert_state(db, "last_premarket_sweep", {"at": utcnow().isoformat(), "flagged": flagged})
+            reviewed[str(p.id)] = today
+            flagged.append(
+                {
+                    "position_id": p.id,
+                    "ticker": ticker,
+                    "symbol": p.symbol,
+                    "gap_pct": round(gap_pct, 2),
+                    "prev_close": prev,
+                    "price": price,
+                }
+            )
+    _upsert_state(db, GAP_REVIEWS_KEY, reviewed)
+    _upsert_state(
+        db,
+        "last_premarket_sweep",
+        {"at": utcnow().isoformat(), "flagged": [f["ticker"] for f in flagged]},
+    )
     db.flush()
     return flagged
 
@@ -1557,6 +1719,7 @@ def _run_monitor_pass(
     from midas.config import reload_settings
 
     reload_settings()  # Settings-tab changes apply within one pass
+    pass_started = utcnow()
     summary: dict[str, Any] = {
         "swept": 0,
         "executed": 0,
@@ -1615,7 +1778,12 @@ def _run_monitor_pass(
         summary["session_open"] = session_open
         regime = market_regime(db)
         summary["regime"] = regime["detail"] + (" [RISK-OFF]" if not regime["risk_on"] else "")
-        summary["premarket_flags"] = premarket_gap_sweep(db)
+        gap_flags = premarket_gap_sweep(db)
+        summary["premarket_flags"] = [f["ticker"] for f in gap_flags]
+        if session_open:
+            # exits the gap review parked for the open go first: before
+            # entries, before the stop layer, halted or not (risk reduction)
+            summary["open_exits"] = execute_open_exits(db)
         regime_ok = regime["risk_on"] or settings.regime_throttle > 0
         summary["executed"] = (
             execute_approved_theses(db) if session_open and regime_ok and not halted else 0
@@ -1671,6 +1839,20 @@ def _run_monitor_pass(
             "portfolio_review",
         ]
     else:
+        for flag in gap_flags:
+            # the gap review is LLM work: it runs now, premarket, with the
+            # news - not at the open, where the stop layer has already spoken
+            try:
+                decision = gap_review(session_factory, router, flag)
+                summary["reviewed"].append(
+                    {
+                        "position_id": str(flag["position_id"]),
+                        "trigger": "gap",
+                        "decision": decision,
+                    }
+                )
+            except Exception:
+                logger.exception("gap review failed for %s", flag.get("ticker"))
         try:
             summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
         except Exception:
@@ -1744,4 +1926,15 @@ def _run_monitor_pass(
         else:
             hb.value = value
         db.commit()
+        if _s.telegram_push_events and _s.telegram_bot_token and _s.telegram_chat_id:
+            # the pass's fills, stops, flags and PM actions, as one message;
+            # the token stays inside the sender and never reaches a log line
+            try:
+                from midas.notify.push import push_pass_events
+
+                summary["pushed"] = push_pass_events(
+                    db, pass_started, token=_s.telegram_bot_token, chat_id=_s.telegram_chat_id
+                )
+            except Exception:
+                logger.exception("push failed")
     return summary
