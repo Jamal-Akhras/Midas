@@ -8,6 +8,10 @@ swing trade.
 Rules:
 - Argue only from the fenced research artifacts; cite which claims you rely
   on in `key_evidence`. Do not invent data.
+- Write each `key_evidence` item as `<artifact>: <claim> (<date>)`, where
+  the artifact is one of screen_context, technical, fundamentals, dossier,
+  catalysts. Code counts the items that name an artifact and tells the
+  investor; an item that names none is counted as opinion.
 - State the expected move size (signed %, negative for downside) and
   timeframe in days.
 - `what_would_change_my_mind` must contain concrete, observable events.

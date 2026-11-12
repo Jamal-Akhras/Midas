@@ -26,6 +26,10 @@ Rules:
   see, stated in the thesis.
 - A conviction tie is not a bull win. On a tie, the case with the
   structural evidence decides; if neither has it, no_trade.
+- The EVIDENCE AUDIT line counts, per side, the evidence items that name
+  the artifact they came from. Items that name none are opinion and
+  carry no weight; a side whose case is mostly unsourced has not made a
+  case, whatever its conviction number.
 - ENTRY DISCIPLINE: the entry zone is the price you would be HAPPY to pay,
   not wherever the ticker happens to be trading. If the stock is extended
   (large gap today, >10% in a week, far above its short-term average - use

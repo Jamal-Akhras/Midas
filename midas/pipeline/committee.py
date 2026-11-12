@@ -277,6 +277,46 @@ def screen_context_content(
     }
 
 
+EVIDENCE_SOURCES = (
+    "screen_context",
+    "screen context",
+    "technical",
+    "fundamentals",
+    "dossier",
+    "catalyst",
+    "filing",
+    "10-k",
+    "10-q",
+    "8-k",
+    "form 4",
+    "insider tool",
+    "earnings data",
+)
+
+
+def evidence_audit(items: list) -> dict:
+    """How many of a case's key_evidence items name the artifact they came
+    from. Code cannot check a claim; it can check whether the claim says
+    where it is from, and an item that does not is opinion (NVDA's bull,
+    bear and verdict cited nothing, 2026-11-11)."""
+    texts = [str(x) for x in (items or [])]
+    unsourced = [t for t in texts if not any(s in t.lower() for s in EVIDENCE_SOURCES)]
+    return {"total": len(texts), "sourced": len(texts) - len(unsourced), "unsourced": unsourced}
+
+
+def evidence_note(bull: dict, bear: dict) -> str:
+    def _side(name: str, a: dict) -> str:
+        line = f"{name} {a['sourced']}/{a['total']} items name an artifact"
+        if a["unsourced"]:
+            line += " (unsourced: " + "; ".join(str(u)[:80] for u in a["unsourced"][:3]) + ")"
+        return line
+
+    return (
+        f"EVIDENCE AUDIT: {_side('bull', bull)}; {_side('bear', bear)}. "
+        "Unsourced items are opinion and carry no weight."
+    )
+
+
 def conviction_comparison(bull: float, bear: float) -> str:
     """The risk check's one-line account of the bull and bear convictions.
     A tie is reported as a tie: telling the investor the bull "won" a 7-7
@@ -653,6 +693,8 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
             direction_note = (
                 f"{comparison}; a long was still sized at {rc.max_qty} shares for your judgment"
             )
+        bull_audit = evidence_audit(bull.get("key_evidence") or [])
+        bear_audit = evidence_audit(bear.get("key_evidence") or [])
         store_code_artifact(
             db,
             run,
@@ -667,6 +709,8 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 "bull_conviction": bull_conviction,
                 "bear_conviction": bear_conviction,
                 "direction_note": direction_note,
+                "evidence_audit": {"bull": bull_audit, "bear": bear_audit},
+                "evidence_note": evidence_note(bull_audit, bear_audit),
                 "note": "binding for the Investor Agent; re-checked at execution",
             },
         )
@@ -719,6 +763,9 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
             if _case_note
             else ""
         )
+        _evidence = str(risk_content.get("evidence_note") or "")
+        if _evidence:
+            _case_block += "\n" + _evidence
         verdict_task = _task(
             "Issue your structured verdict for this candidate. The risk_check document is binding."
         )
