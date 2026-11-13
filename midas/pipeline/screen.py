@@ -83,10 +83,44 @@ def universe_tickers() -> list[str]:
     return base
 
 
-def screen_task_text(tickers: list[str], scan_scores: list[str]) -> str:
+def chart_facts(db: Session, run: PipelineRun, tickers: list[str]) -> dict[str, dict | None]:
+    """The code-computed technical block per ticker (None where the bars
+    failed), with SPY as the relative-strength benchmark. Computed once,
+    before the screener runs, and reused by the gate."""
+    from midas.pipeline.committee import CONTEXT_BARS, technical_block
+    from midas.tools.base import ToolContext
+    from midas.tools.registry import TOOLS
+
+    bench: list[dict] | None = None
+    try:
+        execute = ToolContext(db, run_id=run.id, ticker="SPY").executor(TOOLS)
+        bench = execute("get_daily_bars", {"ticker": "SPY", "days": CONTEXT_BARS})["data"]
+    except Exception as exc:  # noqa: BLE001 - relative strength is a nicety
+        logger.warning("chart facts: SPY bars unavailable (%s)", type(exc).__name__)
+    facts: dict[str, dict | None] = {}
+    for ticker in tickers:
+        try:
+            execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
+            bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
+            facts[ticker] = technical_block(bars, benchmark_bars=bench)
+        except Exception as exc:  # noqa: BLE001 - best-effort per ticker
+            logger.warning("chart facts: bars unavailable for %s (%s)", ticker, type(exc).__name__)
+            facts[ticker] = None
+    return facts
+
+
+def screen_task_text(
+    tickers: list[str],
+    scan_scores: list[str],
+    facts: dict[str, dict | None] | None = None,
+    scores: dict[str, float] | None = None,
+) -> str:
     """The screener's task: the universe, the floors, the deep scan's quant
     ranking when there is one (a structural anchor the model did not have
-    before), and the gate that runs after it."""
+    before), the code-computed chart facts per ticker, and the gate that
+    runs after it."""
+    from midas.pipeline.setup_gate import facts_line
+
     lines = [
         f"Scan this universe for setup candidates. Universe: {', '.join(tickers)}",
         f"Floors (deterministically re-checked): price >= ${settings.min_price_usd}, "
@@ -99,6 +133,14 @@ def screen_task_text(tickers: list[str], scan_scores: list[str]) -> str:
             + ", ".join(scan_scores)
             + ". A universe name without a score was not scored, not rejected."
         )
+    if facts:
+        lines.append(
+            "Chart facts (code-computed from completed bars; the setup label is assigned "
+            "in code and is the one the gate checks - rank and explain, do not relabel):"
+        )
+        for ticker in tickers:
+            if ticker in facts:
+                lines.append(facts_line(ticker, facts[ticker], (scores or {}).get(ticker)))
     if settings.setup_gate_enabled:
         lines.append(
             "Setup gate (deterministic, after you): a candidate below its 50-day average, "
@@ -110,12 +152,16 @@ def screen_task_text(tickers: list[str], scan_scores: list[str]) -> str:
 
 
 def apply_setup_gate(
-    db: Session, run: PipelineRun, candidates: list[dict]
+    db: Session,
+    run: PipelineRun,
+    candidates: list[dict],
+    facts: dict[str, dict | None] | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Check each floor-passing candidate's setup label against the
-    code-computed technical block; drop the charts no setup describes and
-    record why. Bars that cannot be fetched leave the candidate in: the
-    gate removes broken charts, it does not punish missing data."""
+    """Check each floor-passing candidate against the code-computed
+    technical block (`facts` when the screen computed them, else fetched
+    here); drop the charts no setup describes and record why. Bars that
+    cannot be fetched leave the candidate in: the gate removes broken
+    charts, it does not punish missing data."""
     if not settings.setup_gate_enabled:
         return candidates, []
     from midas.pipeline.committee import CONTEXT_BARS, technical_block
@@ -127,15 +173,23 @@ def apply_setup_gate(
     gated: list[dict] = []
     for cand in candidates:
         ticker = str(cand.get("ticker", "")).upper()
-        try:
-            execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
-            bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
-            tech = technical_block(bars)
-        except Exception as exc:  # noqa: BLE001 - best-effort per ticker
-            logger.warning("setup gate: bars unavailable for %s (%s)", ticker, type(exc).__name__)
-            kept.append(cand)
-            continue
-        failures = setup_gate(tech, str(cand.get("setup") or ""))
+        if facts is not None and ticker in facts:
+            tech = facts[ticker]
+            if tech is None:
+                kept.append(cand)
+                continue
+        else:
+            try:
+                execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
+                bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
+                tech = technical_block(bars)
+            except Exception as exc:  # noqa: BLE001 - best-effort per ticker
+                logger.warning(
+                    "setup gate: bars unavailable for %s (%s)", ticker, type(exc).__name__
+                )
+                kept.append(cand)
+                continue
+        failures = setup_gate(tech, str(cand.get("screener_setup") or cand.get("setup") or ""))
         if not failures:
             kept.append(cand)
             continue
@@ -143,6 +197,7 @@ def apply_setup_gate(
             {
                 "ticker": ticker,
                 "setup": cand.get("setup"),
+                "screener_setup": cand.get("screener_setup", ""),
                 "score": cand.get("score"),
                 "reasons": failures,
                 "technical": tech,
@@ -185,6 +240,7 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
 
         ds = db.get(SystemState, "deep_scan")
         scan_scores: list[str] = []
+        scores: dict[str, float] = {}
         if ds and ds.value.get("date") == _now().date().isoformat():
             for cand in ds.value.get("kept", []):
                 t = str(cand.get("ticker", "")).upper()
@@ -193,16 +249,19 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
                 if t not in tickers:
                     tickers.append(t)
                 try:
-                    scan_scores.append(f"{t} {float(cand.get('score') or 0):.0f}")
+                    scores[t] = float(cand.get("score") or 0)
+                    scan_scores.append(f"{t} {scores[t]:.0f}")
                 except (TypeError, ValueError):
                     scan_scores.append(t)
+        facts = chart_facts(db, run, tickers)
+        db.commit()  # the bar snapshots are the screen's record even if the model fails
         try:
             _, parsed = run_agent_stage(
                 db,
                 router,
                 run,
                 AGENT_DEFS["screener"],
-                task_text=screen_task_text(tickers, scan_scores),
+                task_text=screen_task_text(tickers, scan_scores, facts, scores),
             )
         except Exception as exc:
             run.status = RunStatus.failed
@@ -212,8 +271,23 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
             raise
 
         content = parsed.model_dump()
+        # a candidate the screener found outside the list it was given still
+        # gets its chart facts, so every label the committee reads is the code's
+        extra = [
+            t
+            for t in {str(c.get("ticker", "")).upper() for c in content["candidates"]}
+            if t and t not in facts
+        ]
+        if extra:
+            facts.update(chart_facts(db, run, sorted(extra)))
         kept, dropped = [], []
         for cand in content["candidates"]:
+            # the setup label is the code's; the screener's own is kept beside it
+            tech = facts.get(str(cand.get("ticker", "")).upper())
+            if tech is not None:
+                cand["screener_setup"] = cand.get("setup", "")
+                cand["setup"] = tech["setup"]
+                cand["setup_note"] = tech["setup_note"]
             if (
                 cand["price"] >= settings.min_price_usd
                 and cand["avg_volume"] >= settings.min_avg_daily_volume
@@ -221,7 +295,7 @@ def run_screen(session_factory: Callable[[], Session], router: ModelRouter) -> d
                 kept.append(cand)
             else:
                 dropped.append({"ticker": cand["ticker"], "reason": "below price/volume floor"})
-        kept, gated = apply_setup_gate(db, run, kept)
+        kept, gated = apply_setup_gate(db, run, kept, facts)
         content["candidates"] = kept
         content["floor_rejections"] = dropped
         content["setup_rejections"] = gated

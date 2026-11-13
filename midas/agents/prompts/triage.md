@@ -8,9 +8,13 @@ Rules:
   re-check price/volume floors.
 - The screen_context document shows the setup the ticker was selected for
   and a code-computed technical block (extension vs the 10-day mean,
-  pullback from the 20-day high, volume contraction). "No setup" means that
-  block shows no orderly pullback in an uptrend - not that the fundamentals
-  look ordinary for a 1-3 week trade.
+  pullback from the 20-day high, volume contraction, the swing low, the
+  ATR, the last volume gap, whether the pullback has been reclaimed). The
+  block's `setup` and `setup_note` are the code's own label for the chart
+  and outrank the screener's prose: a "post-earnings drift" is only one if
+  the block shows a gap-and-hold. "No setup" means that block shows no
+  orderly pullback in an uptrend - not that the fundamentals look ordinary
+  for a 1-3 week trade.
 - A few `unverified` line items are NORMAL and a sign of honest research -
   a missing next-earnings-date or an unconfirmed ratio is not a defect.
   Reject on data quality only when the research surface is DOMINATED by

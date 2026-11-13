@@ -138,7 +138,8 @@ def test_screen_drops_a_broken_chart_and_records_why(factory, demo_router, monke
     content = screen.run_screen(factory, demo_router)
     assert [c["ticker"] for c in content["candidates"]] == ["ACME"]
     (gated,) = content["setup_rejections"]
-    assert gated["ticker"] == "DUNE" and gated["setup"] == "post-earnings-drift"
+    assert gated["ticker"] == "DUNE" and gated["setup"] == "none"  # the code's label
+    assert gated["screener_setup"] == "post-earnings-drift"
     assert any("50-day" in r for r in gated["reasons"])
     assert any("five sessions" in r for r in gated["reasons"])
     assert gated["technical"]["above_ma50"] is False
