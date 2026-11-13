@@ -7,6 +7,32 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- The setup label is the code's: the technical block names what a chart
+  IS (`pullback-in-uptrend`, `gap-and-hold`, or `none` with the reason)
+  from completed bars, and carries the structure a setup is made of - the
+  20-day high and the swing low since it, the 14-day ATR, the last volume
+  gap and whether its low held, whether the last close reclaimed the
+  10-day mean and the prior close, relative strength against SPY. The
+  screen computes these facts for every ticker before the screener runs,
+  hands them to it as one line per ticker, and overwrites each candidate's
+  `setup` with the code's label (the model's own goes to
+  `screener_setup`).
+- An entry trigger (`SETUP_GATE_REQUIRE_RECLAIM`): a pullback whose last
+  completed close is not back above its 10-day mean and the prior close is
+  still falling, and the gate drops it until it is. A chart with no
+  code-defined setup is dropped with the reason.
+- A stop-against-ATR rule (`MIN_STOP_ATR`): a verdict's stop closer than
+  that many 14-day ATRs to the entry is rejected by the sanity gate and
+  re-prompted once with the swing low to put it under.
+- An earnings entry window (`ENTRY_EARNINGS_BLACKOUT_DAYS`): a trade
+  verdict with earnings inside the window must declare `earnings_play`
+  (the event is the thesis, held through it) or rule no_trade; an
+  earnings play is sized at half risk by the risk engine, in the
+  committee's provisional check and again at execution, from the run's
+  own catalysts/fundamentals date.
+- The daily cycle waits `AUTO_CYCLE_AFTER_OPEN_MINUTES` after the open
+  before screening (both November entries were made inside the first
+  hour, on the day's worst prints).
 - An opening guard on stop-breach exits: the monitor's stop layer exits at
   once only through a disaster floor (`STOP_DISASTER_MULTIPLE` original
   risk units below entry), logs rather than acts inside

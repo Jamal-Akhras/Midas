@@ -90,9 +90,10 @@ Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 
 | Stage | Actor | Kind |
 |---|---|---|
-| Universe screen | Screener Agent | LLM + market-data tools |
+| Chart facts | code | deterministic: the technical block names the setup (pullback-in-uptrend, gap-and-hold, none) and its structure - swing low, 20-day high, ATR, last gap, reclaim, relative strength |
+| Universe screen | Screener Agent, given the chart facts | LLM + market-data tools: ranks and explains; the setup label stays the code's |
 | Price/volume floors | code | deterministic |
-| Setup gate | code | deterministic: the setup label checked against the technical block |
+| Setup gate | code | deterministic: the chart checked against its own label; a pullback not yet reclaimed is dropped |
 | Fundamentals | Earnings/Fundamentals Agent | LLM + earnings/estimates tools |
 | Deep research | Deep Research Agent | LLM + EDGAR, insiders, web search, page fetch |
 | Catalysts | Catalyst/News Agent | LLM + news/earnings tools |
@@ -102,7 +103,7 @@ Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 | Option structure | code generates candidates -> LLM assist picks -> code re-validates | mixed |
 | Risk & sizing | risk engine | **deterministic code only** |
 | Verdict | Investor Agent (risk check is binding) | LLM, high-tier models |
-| Verdict sanity | code: entry zone, stop, targets and reward-to-risk against the live quote | deterministic |
+| Verdict sanity | code: entry zone, stop (incl. at least one ATR away), targets, reward-to-risk and the earnings window against the live quote and the run's record | deterministic |
 | Execution | paper broker + execution-time risk re-check | code |
 | Stop layer | code: disaster floor at once; ordinary breaches wait out the opening guard and need consecutive passes | deterministic |
 | Premarket gap review | Investor Agent, premarket, with news: hold, exit at the open, or raise the stop | LLM, bounded by code |
@@ -187,7 +188,15 @@ book has its own cap (its allocation) and is invisible to the swing caps,
 stops, time stops, reviews and statistics.
 
 A shares verdict needs a first target at least `MIN_REWARD_TO_RISK` stop
-distances from the entry. Stop-breach exits are code with an opening
+distances from the entry, and any verdict's stop must sit at least
+`MIN_STOP_ATR` 14-day ATRs from it (the technical block names the swing
+low to put it under). Inside `ENTRY_EARNINGS_BLACKOUT_DAYS` of earnings a
+trade verdict must declare `earnings_play` or rule no_trade, and an
+earnings play is sized at half risk. The setup label a committee judges
+is the code's own, from completed bars; a pullback that has not closed
+back above its 10-day mean and the prior close is dropped by the gate
+(`SETUP_GATE_REQUIRE_RECLAIM`), and the daily cycle waits
+`AUTO_CYCLE_AFTER_OPEN_MINUTES` after the open. Stop-breach exits are code with an opening
 guard: a breach past the disaster floor exits at once; an ordinary breach
 in the first `STOP_OPENING_GUARD_MINUTES` only logs, and after that it must
 hold on `STOP_CONFIRMATION_PASSES` consecutive passes. A model may raise a
