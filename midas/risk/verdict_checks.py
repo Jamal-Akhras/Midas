@@ -48,8 +48,51 @@ def _reward_to_risk_problem(verdict: VerdictOutput, reference: float, stop: floa
     )
 
 
-def problems(verdict: VerdictOutput, spot: float) -> list[str]:
-    """Empty list = sane. Only trade verdicts are checked."""
+def _atr_problem(stop: float, reference: float, atr: float | None) -> str | None:
+    """NVDA 2026-11-11: a 7% stop in a stock moving 4-5% a day; AXP: levels
+    with no structure behind them. A stop inside one day's range is hit by
+    noise. The ATR comes from the technical block; without one, no check."""
+    floor = float(settings.min_stop_atr)
+    if atr is None or atr <= 0 or floor <= 0:
+        return None
+    distance = abs(reference - stop) / atr
+    if distance >= floor:
+        return None
+    return (
+        f"stop {stop:g} is {distance:.2f} ATR from the entry {reference:g} (14-day ATR {atr:g}; "
+        f"minimum {floor:g} ATR) - a stop inside one day's range is hit by noise, not by a "
+        "broken thesis; put it under the swing low in the technical block"
+    )
+
+
+def _earnings_problem(verdict: VerdictOutput, earnings: tuple[int, str] | None) -> str | None:
+    """NVDA 2026-11-11: bought six days before earnings with the event as
+    the thesis, at full size. Inside the entry window a trade verdict must
+    say it is an earnings play (and is then sized at half risk) or rule
+    no_trade."""
+    window = int(settings.entry_earnings_blackout_days)
+    if earnings is None or window <= 0:
+        return None
+    days, date_str = earnings
+    if days < 0 or days > window or verdict.earnings_play:
+        return None
+    return (
+        f"earnings on {date_str} is {days} day(s) away, inside the {window}-day entry window: "
+        "rule no_trade, or set earnings_play true to hold through the event at half size and "
+        "say so in the thesis"
+    )
+
+
+def problems(
+    verdict: VerdictOutput,
+    spot: float,
+    *,
+    atr: float | None = None,
+    earnings: tuple[int, str] | None = None,
+) -> list[str]:
+    """Empty list = sane. Only trade verdicts are checked. `atr` is the
+    technical block's 14-day ATR; `earnings` is (days away, ISO date) from
+    the run's own artifacts."""
     if verdict.verdict != "trade":
         return []
     lo = float(verdict.entry_zone_low or 0.0)
@@ -80,6 +123,10 @@ def problems(verdict: VerdictOutput, spot: float) -> list[str]:
                 out.append(f"stop is {distance:.1f}% below entry (minimum {STOP_MIN_PCT:g}%)")
             elif distance > STOP_MAX_PCT:
                 out.append(f"stop is {distance:.0f}% below entry (maximum {STOP_MAX_PCT:g}%)")
+            else:
+                atr_problem = _atr_problem(stop, reference, atr)
+                if atr_problem:
+                    out.append(atr_problem)
         bad_targets = [t for t in verdict.targets if float(t) <= hi]
         if bad_targets:
             out.append(f"targets {bad_targets} are not above the entry zone")
@@ -97,6 +144,10 @@ def problems(verdict: VerdictOutput, spot: float) -> list[str]:
                 out.append(f"stop is {distance:.1f}% above entry (minimum {STOP_MIN_PCT:g}%)")
             elif distance > STOP_MAX_PCT:
                 out.append(f"stop is {distance:.0f}% above entry (maximum {STOP_MAX_PCT:g}%)")
+            else:
+                atr_problem = _atr_problem(stop, reference, atr)
+                if atr_problem:
+                    out.append(atr_problem)
         bad_targets = [t for t in verdict.targets if float(t) >= lo]
         if bad_targets:
             out.append(f"targets {bad_targets} are not below the entry zone")
@@ -104,4 +155,7 @@ def problems(verdict: VerdictOutput, spot: float) -> list[str]:
             rr_problem = _reward_to_risk_problem(verdict, reference, stop)
             if rr_problem:
                 out.append(rr_problem)
+    earnings_problem = _earnings_problem(verdict, earnings)
+    if earnings_problem:
+        out.append(earnings_problem)
     return out

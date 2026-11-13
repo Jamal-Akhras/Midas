@@ -222,6 +222,9 @@ class VerdictOutput(BaseModel):
     what_invalidates_this: list[str] = []
     review_schedule: ReviewSchedule = ReviewSchedule()
     no_trade_reason: str = ""
+    # the event is the thesis and the position is held through it, at half
+    # risk; required for a trade inside the earnings entry window
+    earnings_play: bool = False
 
     @model_validator(mode="after")
     def _trade_fields(self) -> "VerdictOutput":

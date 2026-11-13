@@ -228,11 +228,14 @@ def check_shares_trade(
     stop_price: float,
     sector: str = "",
     first_target: float | None = None,
+    risk_scale: float = 1.0,
 ) -> RiskCheck:
     """Size a stock position: risk (entry-stop) per share against the
     per-trade risk cap; then portfolio-level caps. With a first target the
     reward-to-risk floor is checked too (the committee's provisional sizing
-    has none; the executor passes the thesis's)."""
+    has none; the executor passes the thesis's). `risk_scale` below 1
+    shrinks the risk budget: an earnings play inside the entry window is
+    sized at half."""
     checks: dict[str, dict] = {}
     ok = True
 
@@ -275,7 +278,8 @@ def check_shares_trade(
         _check(checks, "regime_throttle", True, f"x{throttle}", "risk-off: budgets scaled down")
     max_qty = 0.0
     if ok and risk_per_share > 0:
-        risk_budget = account_equity * settings.per_trade_risk_pct / 100 * throttle
+        scale = max(0.0, min(float(risk_scale), 1.0))
+        risk_budget = account_equity * settings.per_trade_risk_pct / 100 * throttle * scale
         max_qty = (
             round(risk_budget / risk_per_share, 3)
             if settings.fractional_shares
@@ -285,8 +289,13 @@ def check_shares_trade(
             checks,
             "per_trade_risk",
             True,
-            f"{settings.per_trade_risk_pct}% -> {max_qty} shares",
+            (
+                f"{settings.per_trade_risk_pct}% -> {max_qty} shares"
+                if scale == 1.0
+                else f"{settings.per_trade_risk_pct}% x {scale:g} -> {max_qty} shares"
+            ),
             f"{settings.per_trade_risk_pct}% of equity",
+            "" if scale == 1.0 else "half size: earnings inside the entry window",
         )
         # notional cap: a tight stop must not concentrate the whole account
         # into one name (gap risk ignores stops)
@@ -337,9 +346,12 @@ def check_option_trade(
     premium_per_contract: float,
     dte: int,
     sector: str = "",
+    risk_scale: float = 1.0,
 ) -> RiskCheck:
     """Size an options position. Defined-risk: max loss = premium, so the
-    premium itself is the risk and must fit ALL premium caps."""
+    premium itself is the risk and must fit ALL premium caps. `risk_scale`
+    below 1 shrinks the per-trade premium cap (an earnings play inside the
+    entry window is sized at half)."""
     checks: dict[str, dict] = {}
     ok = True
 
@@ -372,11 +384,13 @@ def check_option_trade(
     elif throttle < 1:
         _check(checks, "regime_throttle", True, f"x{throttle}", "risk-off: budgets scaled down")
     if ok:
+        scale = max(0.0, min(float(risk_scale), 1.0))
         per_trade_cap = (
             account_equity
             * min(settings.per_trade_risk_pct, settings.max_premium_pct_per_trade)
             / 100
             * throttle
+            * scale
         )
         total_cap = account_equity * settings.max_total_premium_pct / 100 * throttle
         already_open = open_premium_usd(db)
@@ -392,6 +406,7 @@ def check_option_trade(
             f"-> {max_contracts} contract(s)",
             f"min({settings.per_trade_risk_pct}%, {settings.max_premium_pct_per_trade}%) "
             f"per trade; {settings.max_total_premium_pct}% total premium",
+            "" if scale == 1.0 else "half size: earnings inside the entry window",
         )
         if max_contracts < 1:
             ok = False

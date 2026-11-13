@@ -169,6 +169,10 @@ class Settings(BaseSettings):
     # --- scheduling ---
     reeval_hour_utc: int = 21  # daily post-close re-evaluation (US close 20/21 UTC)
     earnings_lookahead_days: int = 7  # event trigger window
+    # The daily cycle (screen + committees) waits this long after the open:
+    # both November entries were made inside the first hour, on the day's
+    # worst prints (2026-11-13). 0 = run on the first in-session pass.
+    auto_cycle_after_open_minutes: int = 60
 
     # --- operator notifications (optional) ---
     # A Telegram bot delivers `midas brief --send` (the scheduled check script
@@ -237,6 +241,19 @@ class Settings(BaseSettings):
     setup_gate_max_pullback_pct: float = 12.0  # off the 20-day high
     setup_gate_max_5d_drop_pct: float = 10.0
     setup_gate_max_volume_ratio: float = 1.3  # 5d/20d volume into a pullback
+    # The entry trigger (2026-11-13): a pullback whose last completed close
+    # is not back above its 10-day mean and the prior close is still
+    # falling; the gate drops it until it is. Both November entries were
+    # the third or fourth down day.
+    setup_gate_require_reclaim: bool = True
+
+    # --- entry rules (2026-11-13) ---
+    # A stop closer than this many 14-day ATRs to the entry is hit by noise;
+    # the verdict is re-prompted once (0 = off). No new swing entry inside
+    # this many days of earnings unless the verdict declares an earnings
+    # play, which is then sized at half risk (0 = off).
+    min_stop_atr: float = 1.0
+    entry_earnings_blackout_days: int = 7
 
     # --- portfolio review guard (2026-11-12) ---
     # The PM exited AXP 24 seconds after the committee bought it, on the
@@ -584,6 +601,31 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "attr": "setup_gate_max_volume_ratio",
         "type": "float",
         "group": "universe",
+        "fingerprint": True,
+    },
+    "SETUP_GATE_REQUIRE_RECLAIM": {
+        "attr": "setup_gate_require_reclaim",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "AUTO_CYCLE_AFTER_OPEN_MINUTES": {
+        "attr": "auto_cycle_after_open_minutes",
+        "type": "int",
+        "group": "universe",
+        "fingerprint": False,
+    },
+    # --- entry rules (2026-11-13) ---
+    "MIN_STOP_ATR": {
+        "attr": "min_stop_atr",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "ENTRY_EARNINGS_BLACKOUT_DAYS": {
+        "attr": "entry_earnings_blackout_days",
+        "type": "int",
+        "group": "risk",
         "fingerprint": True,
     },
     # --- portfolio review guard (2026-11-12) ---

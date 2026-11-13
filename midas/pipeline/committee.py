@@ -48,6 +48,7 @@ from midas.models import (
     aware,
     utcnow,
 )
+from midas.pipeline import earnings
 from midas.pipeline.runner import (
     check_daily_spend,
     existing_artifact,
@@ -84,11 +85,69 @@ def _task(text: str) -> str:
     return f"{horizon_text()}\n\n{text}"
 
 
-def technical_block(bars: list[dict], today: date | None = None) -> dict | None:
+ATR_BARS = 14
+GAP_LOOKBACK_BARS = 30
+GAP_MIN_PCT = 3.0
+GAP_MIN_VOLUME_RATIO = 1.5
+RS_BARS = 20
+
+
+def _last_gap(
+    opens: list[float],
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    vols: list[float],
+    dates: list[str],
+) -> dict | None:
+    """The most recent open at least `GAP_MIN_PCT` from the prior close on
+    `GAP_MIN_VOLUME_RATIO` times the volume of the 20 bars before it,
+    inside `GAP_LOOKBACK_BARS`; whether the last close still holds that
+    bar's low (up gap) or high (down gap). An event day as the tape shows
+    it, which is what "post-earnings" has to mean when no one has the date."""
+    n = len(closes)
+    for i in range(n - 1, max(0, n - GAP_LOOKBACK_BARS) - 1, -1):
+        if i < 1:
+            break
+        prev_vols = vols[max(0, i - 20) : i]
+        avg = sum(prev_vols) / len(prev_vols) if prev_vols else 0.0
+        if closes[i - 1] <= 0 or avg <= 0:
+            continue
+        gap = (opens[i] / closes[i - 1] - 1) * 100
+        ratio = vols[i] / avg
+        if abs(gap) < GAP_MIN_PCT or ratio < GAP_MIN_VOLUME_RATIO:
+            continue
+        up = gap > 0
+        out = {
+            "date": dates[i],
+            "gap_pct": round(gap, 1),
+            "volume_ratio": round(ratio, 1),
+            "sessions_ago": n - 1 - i,
+            "direction": "up" if up else "down",
+        }
+        if up:
+            out["low"] = lows[i]
+            out["holds"] = closes[-1] >= lows[i]
+        else:
+            out["high"] = highs[i]
+            out["holds"] = closes[-1] <= highs[i]
+        return out
+    return None
+
+
+def technical_block(
+    bars: list[dict], today: date | None = None, benchmark_bars: list[dict] | None = None
+) -> dict | None:
     """Deterministic technical state from COMPLETED daily bars (today's
     partial session is dropped). None when there is too little history.
     The investor once called AAPL "extended" at +1.5% vs its 10-day mean;
-    these numbers replace that impression."""
+    these numbers replace that impression. Since 2026-11-13 the block also
+    carries the structure a setup is made of - the 20-day high and the
+    swing low since it, the 14-day ATR, the last volume gap, whether the
+    last close reclaimed the 10-day mean and the prior close, relative
+    strength against `benchmark_bars` - and names the setup itself."""
+    from midas.pipeline.setup_gate import code_setup
+
     today = today or date.today()
     cutoff = today.isoformat()
     done = [b for b in bars if str(b.get("date", "")) < cutoff]
@@ -96,17 +155,39 @@ def technical_block(bars: list[dict], today: date | None = None) -> dict | None:
         return None
     closes = [float(b["close"]) for b in done]
     highs = [float(b.get("high") or b["close"]) for b in done]
+    lows = [float(b.get("low") or b["close"]) for b in done]
+    opens = [float(b.get("open") or b["close"]) for b in done]
     vols = [float(b.get("volume") or 0) for b in done]
+    dates = [str(b.get("date", "")) for b in done]
     c = closes[-1]
     ma10 = round(sum(closes[-10:]) / 10, 4)
     ma20 = round(sum(closes[-20:]) / 20, 4)
     ma50 = round(sum(closes[-50:]) / 50, 4) if len(closes) >= 50 else None
-    high20 = max(highs[-20:])
+    n = len(done)
+    hi_idx = max(range(n - 20, n), key=lambda i: (highs[i], i))
+    high20 = highs[hi_idx]
+    lo_idx = min(range(hi_idx, n), key=lambda i: (lows[i], -i))
     v5 = sum(vols[-5:]) / 5
     v20 = sum(vols[-20:]) / 20
-    return {
-        "as_of": str(done[-1]["date"]),
-        "bars_used": len(done),
+    trs = [
+        max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        for i in range(max(1, n - ATR_BARS), n)
+    ]
+    atr = round(sum(trs) / len(trs), 4) if len(trs) >= ATR_BARS else None
+    if ma50 is not None:
+        trend = "uptrend" if c > ma50 and ma20 > ma50 else "downtrend" if c < ma50 else "mixed"
+    else:
+        trend = "uptrend" if c > ma20 and ma10 > ma20 else "mixed"
+    rs = None
+    if benchmark_bars:
+        bench = [float(b["close"]) for b in benchmark_bars if str(b.get("date", "")) < cutoff]
+        if len(bench) > RS_BARS and n > RS_BARS and bench[-RS_BARS - 1] > 0:
+            own = c / closes[-RS_BARS - 1] - 1
+            idx = bench[-1] / bench[-RS_BARS - 1] - 1
+            rs = round((own - idx) * 100, 2)
+    block = {
+        "as_of": dates[-1],
+        "bars_used": n,
         "close": c,
         "ma10": ma10,
         "ma20": ma20,
@@ -116,7 +197,20 @@ def technical_block(bars: list[dict], today: date | None = None) -> dict | None:
         "change_5d_pct": round((c / closes[-6] - 1) * 100, 2),
         "volume_5d_over_20d": round(v5 / v20, 2) if v20 else None,
         "above_ma50": (c > ma50) if ma50 is not None else None,
+        "trend": trend,
+        "high_20d": {"price": high20, "date": dates[hi_idx]},
+        "swing_low": {"price": lows[lo_idx], "date": dates[lo_idx]},
+        "atr14": atr,
+        "atr14_pct": round(atr / c * 100, 2) if atr is not None and c else None,
+        "prior_close": closes[-2],
+        "prior_high": highs[-2],
+        "reclaim": c > ma10 and c > closes[-2],
+        "reclaim_bar": c > highs[-2],
+        "last_gap": _last_gap(opens, highs, lows, closes, vols, dates),
+        "rs_20d_vs_spy_pct": rs,
     }
+    block["setup"], block["setup_note"] = code_setup(block)
+    return block
 
 
 def todays_screen_record(db: Session, ticker: str, today: date | None = None) -> dict | None:
@@ -224,12 +318,16 @@ def recent_exit_note(exit_: dict | None) -> str:
 
 
 def screen_context_content(
-    db: Session, ticker: str, bars: list[dict], bars_error: str = ""
+    db: Session,
+    ticker: str,
+    bars: list[dict],
+    bars_error: str = "",
+    benchmark_bars: list[dict] | None = None,
 ) -> dict:
     """The `screen_context` artifact: what the screen saw plus the technical
     block. Fenced into triage, bull, bear and the investor."""
     screen = todays_screen_record(db, ticker)
-    tech = technical_block(bars) if bars else None
+    tech = technical_block(bars, benchmark_bars=benchmark_bars) if bars else None
     exit_ = recent_exit(db, ticker)
     if screen is None:
         screen_note = (
@@ -249,7 +347,11 @@ def screen_context_content(
         technical_note = (
             "computed in code from completed daily bars (today's partial session "
             "excluded): extension is vs the 10-day mean, pullback is from the 20-day high, "
-            "volume_5d_over_20d < 1 means volume contracted into the pullback"
+            "volume_5d_over_20d < 1 means volume contracted into the pullback; `setup` is "
+            "the code's own label (see setup_note), `swing_low` is the lowest low since the "
+            "20-day high (the structural stop goes under it), `high_20d` is the first "
+            "target's reference, `atr14` is one day's range (a stop inside it is noise), "
+            "`reclaim` is a close back above the 10-day mean and the prior close"
         )
     failures = setup_gate(tech, str((screen or {}).get("setup") or "")) if tech else []
     if tech is None:
@@ -451,6 +553,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
             execute = ctx.executor(TOOLS)
             bars: list[dict] = []
             bars_error = ""
+            bench: list[dict] | None = None
             try:
                 bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
             except Exception as exc:  # noqa: BLE001 - context is best-effort; the run goes on
@@ -458,13 +561,20 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                     f"daily bars unavailable ({type(exc).__name__}); technical state unknown"
                 )
                 logger.warning("screen context bars failed for %s: %s", ticker, exc)
+            if bars:
+                try:
+                    bench = execute("get_daily_bars", {"ticker": "SPY", "days": CONTEXT_BARS})[
+                        "data"
+                    ]
+                except Exception as exc:  # noqa: BLE001 - relative strength is a nicety
+                    logger.warning("screen context SPY bars failed: %s", type(exc).__name__)
             art = store_code_artifact(
                 db,
                 run,
                 agent_slug="screen-context",
                 artifact_type=ArtifactType.screen_context,
                 ticker=ticker,
-                content=screen_context_content(db, ticker, bars or [], bars_error),
+                content=screen_context_content(db, ticker, bars or [], bars_error, bench),
             )
             ctx.stamp_artifact(art.id)
         db.commit()
@@ -662,6 +772,15 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
         structure = required_artifact(db, run_id, ArtifactType.structure).content
         equity = _account_equity(db)
         comparison = conviction_comparison(bull_conviction, bear_conviction)
+        earnings_at = earnings.days_away(db, run_id)
+        earnings_window = earnings.inside_entry_window(
+            earnings_at, settings.entry_earnings_blackout_days
+        )
+        if earnings_window and earnings_at is not None:
+            comparison += (
+                f"; earnings on {earnings_at[1]} in {earnings_at[0]} day(s): inside the "
+                f"{settings.entry_earnings_blackout_days}-day entry window, sized at half risk"
+            )
         if structure.get("available"):
             pick = structure["validated_pick"]
             rc = risk_engine.check_option_trade(
@@ -670,6 +789,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 premium_per_contract=float(pick["est_premium_per_contract"]),
                 dte=int(pick["dte"]),
                 sector=sector,
+                risk_scale=0.5 if earnings_window else 1.0,
             )
             sized_direction = str(structure.get("direction") or direction)
             direction_note = f"{comparison}; option structure sized on the {sized_direction} side"
@@ -688,6 +808,7 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 entry_price=spot,
                 stop_price=stop,
                 sector=sector,
+                risk_scale=0.5 if earnings_window else 1.0,
             )
             sized_direction = "bullish"
             direction_note = (
@@ -788,7 +909,10 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
         # ---- deterministic sanity gate against the live quote ----
         gate_ctx = ToolContext(db, run_id=run_id, ticker=ticker)
         live = float(gate_ctx.executor(TOOLS)("get_quote", {"ticker": ticker})["data"]["price"])
-        issues = verdict_checks.problems(verdict, live)
+        _sc = existing_artifact(db, run_id, ArtifactType.screen_context)
+        _atr = ((_sc.content.get("technical") or {}) if _sc is not None else {}).get("atr14")
+        _earnings_at = earnings.days_away(db, run_id)
+        issues = verdict_checks.problems(verdict, live, atr=_atr, earnings=_earnings_at)
         if issues:
             record_event(
                 db,
@@ -811,14 +935,18 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                     "YOUR PREVIOUS VERDICT WAS REJECTED by the deterministic sanity gate: "
                     + "; ".join(issues)
                     + f". The live quote is ${live:.2f}. Entry zone within 15% of it, stop "
-                    "2-25% beyond the entry on the thesis side, targets beyond the entry, "
-                    f"first target at least {settings.min_reward_to_risk:g}x the stop "
-                    "distance from the entry. Fix the levels or rule no_trade."
+                    "2-25% beyond the entry on the thesis side and at least "
+                    f"{settings.min_stop_atr:g} ATR from it (the technical block's atr14; put "
+                    "it under the swing low), targets beyond the entry, first target at least "
+                    f"{settings.min_reward_to_risk:g}x the stop distance from the entry. Inside "
+                    f"the {settings.entry_earnings_blackout_days}-day earnings window a trade "
+                    "needs earnings_play true (half size) or no_trade. Fix the levels or rule "
+                    "no_trade."
                 ),
                 force_new_version=True,
             )
             gate_ctx.stamp_artifact(verdict_art.id)
-            issues = verdict_checks.problems(verdict, live)
+            issues = verdict_checks.problems(verdict, live, atr=_atr, earnings=_earnings_at)
             if issues:
                 record_event(
                     db,

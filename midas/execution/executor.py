@@ -133,6 +133,14 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
             ) from exc
         sector = str(quote.get("sector") or "")
         _gate_shares_entry(db, thesis, spot)
+        from midas.pipeline import earnings as _earnings
+
+        # an entry inside the earnings window is an earnings play (the
+        # verdict declared it, or it would not exist): half risk, judged on
+        # the run's own record at the moment of the fill
+        inside_window = _earnings.inside_entry_window(
+            _earnings.days_away(db, thesis.run_id), settings.entry_earnings_blackout_days
+        )
         rc = risk_engine.check_shares_trade(
             db,
             account_equity=equity,
@@ -140,6 +148,7 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
             stop_price=thesis.stop_price,
             sector=sector,
             first_target=(float(thesis.targets[0]) if thesis.targets else None),
+            risk_scale=0.5 if inside_window else 1.0,
         )
         # the engine already floors the size at MIN_SWING_NOTIONAL_USD; a
         # fraction of a share is a valid size (FRACTIONAL_SHARES)

@@ -133,5 +133,8 @@ def _pin_market_state(monkeypatch):
     monkeypatch.setattr(monitor, "_minutes_since_open", lambda: 120.0)
     monkeypatch.setattr(_config.settings, "stop_confirmation_passes", 1)
     # likewise the suite's fixtures carry 1.1-1.3:1 trades written before the
-    # reward-to-risk floor existed (tests/test_reward_to_risk.py turns it on)
+    # reward-to-risk floor existed (tests/test_reward_to_risk.py turns it on),
+    # and stops inside one ATR of the demo chart (tests/test_entry_rules.py
+    # turns the ATR rule on)
     monkeypatch.setattr(_config.settings, "min_reward_to_risk", 0.0)
+    monkeypatch.setattr(_config.settings, "min_stop_atr", 0.0)

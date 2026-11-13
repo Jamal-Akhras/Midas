@@ -1015,6 +1015,9 @@ def maybe_auto_cycle(session_factory: Callable[[], Session], router: ModelRouter
         return None
     if not _market_open_today():
         return None  # holidays: a 'weekday' with no market is not a trading day
+    minutes = _minutes_since_open()
+    if minutes is not None and minutes < settings.auto_cycle_after_open_minutes:
+        return None  # the first hour is the day's worst prints (both November entries)
     with session_factory() as db:
         if not market_regime(db)["risk_on"] and settings.regime_throttle <= 0:
             return None  # binary risk-off: no research spend on refused entries
@@ -1561,11 +1564,14 @@ def _strategy_fingerprint() -> str:
             "setup_gate_max_pullback_pct",
             "setup_gate_max_5d_drop_pct",
             "setup_gate_max_volume_ratio",
+            "setup_gate_require_reclaim",
             "pm_exit_min_age_hours",
             "stop_opening_guard_minutes",
             "stop_confirmation_passes",
             "stop_disaster_multiple",
             "min_reward_to_risk",
+            "min_stop_atr",
+            "entry_earnings_blackout_days",
         )
     }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())

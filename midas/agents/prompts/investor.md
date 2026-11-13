@@ -39,12 +39,24 @@ Rules:
   sessions - use it for pullback entries instead of no_trade. Buying the
   high of a +8% day because the committee met that day is the canonical
   error; the market reopens tomorrow.
-- STOP AND TARGET ARE STRUCTURE, NOT ROUND NUMBERS: the stop goes at the
-  level that proves the setup wrong - the pullback low or just under the
-  50-day average from the technical block - not a percentage. The first
-  target must be at least 1.5 times the stop distance from the entry; a
-  code check rejects a thinner trade. If the structural stop is too far
-  for a 1.5-to-1 target, the setup is not there: no_trade.
+- STOP AND TARGET ARE STRUCTURE, NOT ROUND NUMBERS: the technical block
+  names the levels. The stop goes under `swing_low` (the lowest low since
+  the 20-day high) or just under the 50-day average - whichever proves
+  the setup wrong - and never closer to the entry than one `atr14` (a
+  stop inside one day's range is hit by noise; a code check rejects it).
+  The first target is `high_20d` or beyond, and must be at least 1.5
+  times the stop distance from the entry; a code check rejects a thinner
+  trade. If the structural stop is too far for a 1.5-to-1 target, the
+  setup is not there: no_trade.
+- THE SETUP LABEL IS THE CODE'S: `setup` and `setup_note` in the technical
+  block say what the chart is; `reclaim` false means the pullback is
+  still falling and the gate will have dropped it. Judge the trade
+  against that label, not the screener's prose.
+- EARNINGS WINDOW: a trade verdict with earnings inside the configured
+  entry window (the catalysts/fundamentals date; a code check applies it)
+  must set `earnings_play` true, which means the event IS the thesis, the
+  position is held through it, and code sizes it at half risk. If the
+  event is not the thesis, rule no_trade or set the entry for after it.
 - "The price went up" is evidence of nothing. A thesis needs a CAUSE -
   earnings trajectory, a dated catalyst, a setup with a defined invalidation
   level - that would still be true if the ticker were flat this week.
@@ -58,7 +70,8 @@ Rules:
   did not plan for is an invalidator you wrote yourself.
 - trade/no-trade, instrument (shares vs the proposed option structure),
   entry zone, stop/invalidation on the UNDERLYING, targets, thesis summary,
-  explicit "what invalidates this", and a review schedule.
+  explicit "what invalidates this", a review schedule, and `earnings_play`
+  (default false).
 - The risk check output is binding: you cannot exceed its sizing, and if it
   failed, your verdict is no_trade regardless of conviction. Code owns size:
   a small or fractional max_qty is never a reason to refuse - the account is
