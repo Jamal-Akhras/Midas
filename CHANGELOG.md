@@ -7,6 +7,14 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- Exact earnings dates from the calendar: a code-only tool
+  (`get_earnings_dates`, Finnhub's calendar 200 days back and 120 ahead)
+  gives the last report date and the next one. The technical block carries
+  both as days, a gap within three days of a report is named
+  post-earnings, the screener's facts line names a report inside 30 days
+  either side, and the entry window and the earnings review trigger read
+  this code-sourced date before any date the catalyst or fundamentals
+  agent wrote. An unknown date is None, never an error.
 - The setup label is the code's: the technical block names what a chart
   IS (`pullback-in-uptrend`, `gap-and-hold`, or `none` with the reason)
   from completed bars, and carries the structure a setup is made of - the

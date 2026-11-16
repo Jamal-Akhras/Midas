@@ -90,7 +90,7 @@ Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 
 | Stage | Actor | Kind |
 |---|---|---|
-| Chart facts | code | deterministic: the technical block names the setup (pullback-in-uptrend, gap-and-hold, none) and its structure - swing low, 20-day high, ATR, last gap, reclaim, relative strength |
+| Chart facts | code | deterministic: the technical block names the setup (pullback-in-uptrend, gap-and-hold, none) and its structure - swing low, 20-day high, ATR, last gap (post-earnings when the calendar says so), reclaim, relative strength, days since/until earnings |
 | Universe screen | Screener Agent, given the chart facts | LLM + market-data tools: ranks and explains; the setup label stays the code's |
 | Price/volume floors | code | deterministic |
 | Setup gate | code | deterministic: the chart checked against its own label; a pullback not yet reclaimed is dropped |
