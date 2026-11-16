@@ -50,25 +50,19 @@ def test_scheduled_trigger_when_review_due(factory, demo_router):
         assert due and due[0][1] == CheckpointTrigger.scheduled
 
 
-def test_earnings_trigger_beats_schedule(factory, demo_router):
+def test_earnings_trigger_beats_schedule(factory, demo_router, monkeypatch):
+    from midas.tools import demo_data
+
+    # earnings inside the lookahead, as the calendar tool reports it (the
+    # screen context's code-sourced date is the one the trigger reads first)
+    soon = (date.today() + timedelta(days=3)).isoformat()
+    monkeypatch.setitem(demo_data.EARNINGS["default"], "next_earnings_date", soon)
+    # the entry window would refuse this entry; the test is about the review
+    monkeypatch.setattr(settings, "entry_earnings_blackout_days", 0)
     open_acme_position(factory, demo_router)
     with factory() as db:
         p = db.scalar(select(Position))
         p.next_review_at = utcnow() + timedelta(days=5)  # not due by calendar
-        # plant a catalysts artifact with earnings inside the lookahead
-        run = PipelineRun(kind=RunKind.committee, ticker="ACME")
-        db.add(run)
-        db.flush()
-        db.add(
-            ResearchArtifact(
-                run_id=run.id,
-                ticker="ACME",
-                agent_slug="catalyst",
-                artifact_type=ArtifactType.catalysts,
-                content={"upcoming_earnings_date": (date.today() + timedelta(days=3)).isoformat()},
-                created_at=utcnow() + timedelta(minutes=1),  # strictly newest
-            )
-        )
         db.commit()
         due = due_positions(db)
         assert due and due[0][1] == CheckpointTrigger.earnings

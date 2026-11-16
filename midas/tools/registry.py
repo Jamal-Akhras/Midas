@@ -58,6 +58,12 @@ TOOLS: dict[str, Tool] = {
         parameters=params({"ticker": {"type": "string"}}, ["ticker"]),
         fn=fundamentals_news.get_earnings,
     ),
+    "get_earnings_dates": Tool(
+        name="get_earnings_dates",
+        description="Last and next earnings report dates from the calendar (code-only; not in any agent toolset).",
+        parameters=params({"ticker": {"type": "string"}}, ["ticker"]),
+        fn=fundamentals_news.get_earnings_dates,
+    ),
     "get_news": Tool(
         name="get_news",
         description="Recent company news with URLs and dates.",

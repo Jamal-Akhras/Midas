@@ -241,3 +241,66 @@ def get_news(ticker: str, limit: int = 10) -> ToolResult:
         )
     merged.sort(key=lambda n: str(n.get("date", "")), reverse=True)
     return ToolResult(data=merged[: max(limit, 12)], source="+".join(used))
+
+
+EARNINGS_CALENDAR_LOOKBACK_DAYS = 200
+
+
+def get_earnings_dates(ticker: str, today: date | None = None) -> ToolResult:
+    """The last earnings report date and the next one, from the calendar.
+    Code calls this (not the agents): the chart facts name a gap that
+    followed a report post-earnings, and the entry window and the review
+    trigger read this date before any date a model wrote. Unknown is
+    None, never an error - a missing date is a missing fact."""
+    ticker = ticker.upper()
+    today = today or date.today()
+    blank = {
+        "ticker": ticker,
+        "last_report_date": None,
+        "next_report_date": None,
+        "as_of": today.isoformat(),
+    }
+    if settings.effective_demo_mode:
+        fixture = demo_data.EARNINGS["default"]
+        return ToolResult(
+            data={
+                **blank,
+                "last_report_date": fixture.get("last_report_date"),
+                "next_report_date": fixture.get("next_earnings_date"),
+            },
+            source="demo",
+        )
+    if not settings.finnhub_api_key:
+        return ToolResult(data=blank, source="none")
+    try:
+        cal = httpx.get(
+            f"{FINNHUB_BASE}/calendar/earnings",
+            params={
+                "symbol": ticker,
+                "from": (today - timedelta(days=EARNINGS_CALENDAR_LOOKBACK_DAYS)).isoformat(),
+                "to": (today + timedelta(days=EARNINGS_CALENDAR_LOOKAHEAD_DAYS)).isoformat(),
+                "token": settings.finnhub_api_key,
+            },
+            timeout=15,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("finnhub earnings calendar failed for %s: %s", ticker, type(exc).__name__)
+        return ToolResult(data=blank, source="none")
+    if cal.status_code != 200:
+        return ToolResult(data=blank, source="none")
+    past: list[date] = []
+    ahead: list[date] = []
+    for event in cal.json().get("earningsCalendar") or []:
+        try:
+            when = date.fromisoformat(str(event.get("date") or "")[:10])
+        except ValueError:
+            continue
+        (ahead if when >= today else past).append(when)
+    return ToolResult(
+        data={
+            **blank,
+            "last_report_date": max(past).isoformat() if past else None,
+            "next_report_date": min(ahead).isoformat() if ahead else None,
+        },
+        source="finnhub",
+    )

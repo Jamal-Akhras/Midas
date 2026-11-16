@@ -145,18 +145,16 @@ def test_half_risk_inside_the_earnings_window(db):
 
 
 def test_committee_refuses_a_verdict_inside_the_earnings_window(factory, demo_router, monkeypatch):
-    from midas.providers import demo_provider
 
     monkeypatch.setattr(settings, "demo_mode", True)
     monkeypatch.setattr(settings, "autonomy_level", 0)
     monkeypatch.setattr(settings, "entry_earnings_blackout_days", 7)
-    calls, fundamentals = demo_provider.SCRIPTS["fundamentals"]
+    from midas.tools import demo_data
+
+    # the calendar tool's date (code-sourced, in the screen context) is the
+    # one the window reads; the demo fixture feeds both it and the agent
     soon = (date.today() + timedelta(days=5)).isoformat()
-    monkeypatch.setitem(
-        demo_provider.SCRIPTS,
-        "fundamentals",
-        (calls, lambda t: {**fundamentals(t), "next_earnings_date": soon}),
-    )
+    monkeypatch.setitem(demo_data.EARNINGS["default"], "next_earnings_date", soon)
     result = run_committee(factory, demo_router, "ACME")
     assert result.status == RunStatus.done and result.thesis_id is None
     with factory() as db:

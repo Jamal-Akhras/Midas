@@ -31,6 +31,7 @@ CODE_SETUPS = ("pullback-in-uptrend", "gap-and-hold")
 MAX_EXTENSION_PCT = 8.0  # above the 10-day mean: chasing
 MAX_BREAKDOWN_PCT = 5.0  # below the 10-day mean: breaking down
 GAP_HOLD_SESSIONS = 15  # an up gap older than this is history, not a setup
+EARNINGS_LINE_DAYS = 30  # the screener's line names a report this close, either side
 
 
 def normalise_setup(setup: str) -> str:
@@ -87,8 +88,9 @@ def code_setup(technical: dict | None) -> tuple[str, str]:
         and gap.get("holds")
         and int(gap.get("sessions_ago", 10**6)) <= GAP_HOLD_SESSIONS
     ):
+        kind = "post-earnings gap" if gap.get("earnings") else "gap"
         return "gap-and-hold", (
-            f"{float(gap['gap_pct']):+.1f}% gap on {float(gap['volume_ratio']):.1f}x volume "
+            f"{float(gap['gap_pct']):+.1f}% {kind} on {float(gap['volume_ratio']):.1f}x volume "
             f"{gap['sessions_ago']} session(s) ago; holding above the gap bar's low "
             f"{_g(gap.get('low'))}"
         )
@@ -136,6 +138,12 @@ def facts_line(ticker: str, technical: dict | None, score: float | None = None) 
     rs = technical.get("rs_20d_vs_spy_pct")
     if rs is not None:
         parts.append(f"RS20 vs SPY {float(rs):+.1f}%")
+    since = technical.get("days_since_earnings")
+    if since is not None and 0 <= int(since) <= EARNINGS_LINE_DAYS:
+        parts.append(f"reported {int(since)} day(s) ago")
+    ahead = technical.get("days_to_earnings")
+    if ahead is not None and 0 <= int(ahead) <= EARNINGS_LINE_DAYS:
+        parts.append(f"earnings in {int(ahead)} day(s)")
     return f"{head}: " + "; ".join(parts)
 
 

@@ -145,6 +145,7 @@ def test_an_up_gap_on_volume_that_holds_is_a_gap_and_hold():
         "direction": "up",
         "low": 134.12,
         "holds": True,
+        "earnings": False,  # no calendar date given: not known to be a report gap
     }
     assert tech["setup"] == "gap-and-hold"
     assert tech["setup_note"] == (

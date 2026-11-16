@@ -102,10 +102,18 @@ def chart_facts(db: Session, run: PipelineRun, tickers: list[str]) -> dict[str, 
         try:
             execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
             bars = execute("get_daily_bars", {"ticker": ticker, "days": CONTEXT_BARS})["data"]
-            facts[ticker] = technical_block(bars, benchmark_bars=bench)
         except Exception as exc:  # noqa: BLE001 - best-effort per ticker
             logger.warning("chart facts: bars unavailable for %s (%s)", ticker, type(exc).__name__)
             facts[ticker] = None
+            continue
+        dates: dict | None = None
+        try:
+            dates = execute("get_earnings_dates", {"ticker": ticker})["data"]
+        except Exception as exc:  # noqa: BLE001 - an unknown date is a missing fact
+            logger.warning(
+                "chart facts: earnings dates failed for %s (%s)", ticker, type(exc).__name__
+            )
+        facts[ticker] = technical_block(bars, benchmark_bars=bench, earnings=dates)
     return facts
 
 

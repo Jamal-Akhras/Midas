@@ -49,6 +49,7 @@ from midas.models import (
     utcnow,
 )
 from midas.pipeline import earnings
+from midas.pipeline.earnings import parse_date as parse_earnings_date
 from midas.pipeline.runner import (
     check_daily_spend,
     existing_artifact,
@@ -135,8 +136,14 @@ def _last_gap(
     return None
 
 
+EARNINGS_GAP_DAYS = 3  # a gap this soon after a report is the report's
+
+
 def technical_block(
-    bars: list[dict], today: date | None = None, benchmark_bars: list[dict] | None = None
+    bars: list[dict],
+    today: date | None = None,
+    benchmark_bars: list[dict] | None = None,
+    earnings: dict | None = None,
 ) -> dict | None:
     """Deterministic technical state from COMPLETED daily bars (today's
     partial session is dropped). None when there is too little history.
@@ -145,10 +152,15 @@ def technical_block(
     carries the structure a setup is made of - the 20-day high and the
     swing low since it, the 14-day ATR, the last volume gap, whether the
     last close reclaimed the 10-day mean and the prior close, relative
-    strength against `benchmark_bars` - and names the setup itself."""
+    strength against `benchmark_bars` - and names the setup itself.
+    `earnings` is the calendar tool's record (last/next report dates): the
+    block carries both as days, and a gap inside `EARNINGS_GAP_DAYS` of the
+    last report is the report's."""
     from midas.pipeline.setup_gate import code_setup
 
     today = today or date.today()
+    last_report = parse_earnings_date((earnings or {}).get("last_report_date"))
+    next_report = parse_earnings_date((earnings or {}).get("next_report_date"))
     cutoff = today.isoformat()
     done = [b for b in bars if str(b.get("date", "")) < cutoff]
     if len(done) < MIN_TECHNICAL_BARS:
@@ -185,6 +197,15 @@ def technical_block(
             own = c / closes[-RS_BARS - 1] - 1
             idx = bench[-1] / bench[-RS_BARS - 1] - 1
             rs = round((own - idx) * 100, 2)
+    gap = _last_gap(opens, highs, lows, closes, vols, dates)
+    if gap is not None:
+        gap["earnings"] = False
+        if last_report is not None:
+            try:
+                since = (date.fromisoformat(gap["date"]) - last_report).days
+            except ValueError:
+                since = -1
+            gap["earnings"] = 0 <= since <= EARNINGS_GAP_DAYS
     block = {
         "as_of": dates[-1],
         "bars_used": n,
@@ -206,8 +227,12 @@ def technical_block(
         "prior_high": highs[-2],
         "reclaim": c > ma10 and c > closes[-2],
         "reclaim_bar": c > highs[-2],
-        "last_gap": _last_gap(opens, highs, lows, closes, vols, dates),
+        "last_gap": gap,
         "rs_20d_vs_spy_pct": rs,
+        "last_earnings_date": last_report.isoformat() if last_report else None,
+        "days_since_earnings": (today - last_report).days if last_report else None,
+        "next_earnings_date": next_report.isoformat() if next_report else None,
+        "days_to_earnings": (next_report - today).days if next_report else None,
     }
     block["setup"], block["setup_note"] = code_setup(block)
     return block
@@ -323,11 +348,16 @@ def screen_context_content(
     bars: list[dict],
     bars_error: str = "",
     benchmark_bars: list[dict] | None = None,
+    earnings_dates: dict | None = None,
 ) -> dict:
     """The `screen_context` artifact: what the screen saw plus the technical
     block. Fenced into triage, bull, bear and the investor."""
     screen = todays_screen_record(db, ticker)
-    tech = technical_block(bars, benchmark_bars=benchmark_bars) if bars else None
+    tech = (
+        technical_block(bars, benchmark_bars=benchmark_bars, earnings=earnings_dates)
+        if bars
+        else None
+    )
     exit_ = recent_exit(db, ticker)
     if screen is None:
         screen_note = (
@@ -568,13 +598,18 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                     ]
                 except Exception as exc:  # noqa: BLE001 - relative strength is a nicety
                     logger.warning("screen context SPY bars failed: %s", type(exc).__name__)
+            edates: dict | None = None
+            try:
+                edates = execute("get_earnings_dates", {"ticker": ticker})["data"]
+            except Exception as exc:  # noqa: BLE001 - an unknown date is a missing fact
+                logger.warning("screen context earnings dates failed: %s", type(exc).__name__)
             art = store_code_artifact(
                 db,
                 run,
                 agent_slug="screen-context",
                 artifact_type=ArtifactType.screen_context,
                 ticker=ticker,
-                content=screen_context_content(db, ticker, bars or [], bars_error, bench),
+                content=screen_context_content(db, ticker, bars or [], bars_error, bench, edates),
             )
             ctx.stamp_artifact(art.id)
         db.commit()

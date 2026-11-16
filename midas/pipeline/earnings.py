@@ -15,7 +15,7 @@ from datetime import date, datetime
 from sqlalchemy.orm import Session
 
 from midas.models import ArtifactType
-from midas.pipeline.runner import existing_artifact
+from midas.pipeline.runner import existing_artifact, latest_artifact_for_ticker
 
 DATE_FORMATS = ("%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y", "%Y/%m/%d", "%m/%d/%Y")
 
@@ -38,10 +38,22 @@ def parse_date(text: object) -> date | None:
     return None
 
 
+def _code_date(screen_context: object) -> date | None:
+    """The calendar tool's next report date as the screen context recorded
+    it in its technical block (code-sourced; 2026-11-16)."""
+    content = getattr(screen_context, "content", None) or {}
+    technical = content.get("technical") or {}
+    return parse_date(technical.get("next_earnings_date"))
+
+
 def days_away(db: Session, run_id: uuid.UUID, today: date | None = None) -> tuple[int, str] | None:
-    """(days until earnings, ISO date) from the run's catalysts artifact,
-    else its fundamentals artifact; None when neither names a date."""
+    """(days until earnings, ISO date): the screen context's code-sourced
+    calendar date first, then the run's catalysts artifact, then its
+    fundamentals artifact; None when none of them names a date."""
     today = today or date.today()
+    d = _code_date(existing_artifact(db, run_id, ArtifactType.screen_context))
+    if d is not None:
+        return (d - today).days, d.isoformat()
     for art_type, key in (
         (ArtifactType.catalysts, "upcoming_earnings_date"),
         (ArtifactType.fundamentals, "next_earnings_date"),
@@ -53,6 +65,26 @@ def days_away(db: Session, run_id: uuid.UUID, today: date | None = None) -> tupl
         if d is not None:
             return (d - today).days, d.isoformat()
     return None
+
+
+def next_date_for_ticker(db: Session, ticker: str) -> str:
+    """The next earnings date on record for a ticker as an ISO string, or
+    "": the latest screen context's code-sourced date first, then the
+    latest catalysts and fundamentals artifacts (the review trigger)."""
+    d = _code_date(latest_artifact_for_ticker(db, ticker, ArtifactType.screen_context))
+    if d is not None:
+        return d.isoformat()
+    for art_type, key in (
+        (ArtifactType.catalysts, "upcoming_earnings_date"),
+        (ArtifactType.fundamentals, "next_earnings_date"),
+    ):
+        art = latest_artifact_for_ticker(db, ticker, art_type)
+        if art is None:
+            continue
+        d = parse_date((art.content or {}).get(key))
+        if d is not None:
+            return d.isoformat()
+    return ""
 
 
 def inside_entry_window(earnings: tuple[int, str] | None, window_days: int) -> bool:

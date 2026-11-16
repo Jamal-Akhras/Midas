@@ -238,17 +238,11 @@ def _earnings_proximity(db: Session, p: Position) -> str | None:
     catalysts/fundamentals artifacts (tool-sourced, snapshotted data)."""
     from datetime import date
 
-    from midas.models import ArtifactType
-    from midas.pipeline.runner import latest_artifact_for_ticker
+    from midas.pipeline import earnings
 
-    date_str = ""
-    cat = latest_artifact_for_ticker(db, p.ticker, ArtifactType.catalysts)
-    if cat is not None:
-        date_str = cat.content.get("upcoming_earnings_date") or ""
-    if not date_str:
-        fund = latest_artifact_for_ticker(db, p.ticker, ArtifactType.fundamentals)
-        if fund is not None:
-            date_str = fund.content.get("next_earnings_date") or ""
+    # the code-sourced calendar date in the latest screen context first,
+    # then the dates the catalyst/fundamentals agents wrote (2026-11-16)
+    date_str = earnings.next_date_for_ticker(db, p.ticker)
     if not date_str:
         return None
     try:

@@ -138,6 +138,7 @@ INSIDER_TRANSACTIONS = {
 EARNINGS = {
     "default": {
         "next_earnings_date": _iso(TODAY + timedelta(days=32)),
+        "last_report_date": _iso(TODAY - timedelta(days=25)),
         "quarters": [
             {"period": "2026Q1", "eps_actual": 1.42, "eps_estimate": 1.31, "surprise_pct": 8.4},
             {"period": "2025Q4", "eps_actual": 1.28, "eps_estimate": 1.25, "surprise_pct": 2.4},
