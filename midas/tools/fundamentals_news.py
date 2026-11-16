@@ -296,11 +296,35 @@ def get_earnings_dates(ticker: str, today: date | None = None) -> ToolResult:
         except ValueError:
             continue
         (ahead if when >= today else past).append(when)
+    source = "finnhub"
+    if not past:
+        # the free calendar keeps about a month of history (2026-11-16: AXP
+        # 24 days back came through, UNH 34 and NVDA 82 did not); yfinance
+        # carries the past report dates, so it fills the last one only
+        past = [d for d in _yf_report_dates(ticker) if d < today]
+        if past:
+            source = "finnhub+yfinance"
     return ToolResult(
         data={
             **blank,
             "last_report_date": max(past).isoformat() if past else None,
             "next_report_date": min(ahead).isoformat() if ahead else None,
         },
-        source="finnhub",
+        source=source,
     )
+
+
+def _yf_report_dates(ticker: str) -> list[date]:
+    """Report dates from yfinance's earnings_dates table (New York
+    timestamps, future estimates included); empty on any failure."""
+    from midas.tools import market_data
+
+    yf = market_data._yf()
+    if yf is None:
+        return []
+    try:
+        table = yf.Ticker(ticker).earnings_dates
+        return [stamp.date() for stamp in getattr(table, "index", [])]
+    except Exception as exc:  # noqa: BLE001 - a scraped source; unknown beats a crash
+        logger.warning("yfinance earnings dates failed for %s: %s", ticker, type(exc).__name__)
+        return []

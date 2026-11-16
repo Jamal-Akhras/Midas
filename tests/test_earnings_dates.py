@@ -85,6 +85,58 @@ def test_no_key_means_unknown_not_an_error(live_finnhub, monkeypatch):
     assert result.data["last_report_date"] is None and result.data["next_report_date"] is None
 
 
+class _FakeYF:
+    """yfinance as the fallback sees it: Ticker(sym).earnings_dates is a
+    DataFrame indexed by New York timestamps, newest first, future rows
+    included."""
+
+    def __init__(self, stamps: list[str], fail: bool = False):
+        self.stamps = stamps
+        self.fail = fail
+        self.asked: list[str] = []
+
+    def Ticker(self, sym):  # noqa: N802 - yfinance's name
+        import pandas as pd
+
+        self.asked.append(sym)
+        if self.fail:
+            raise RuntimeError("rate limited")
+        idx = pd.DatetimeIndex([pd.Timestamp(s, tz="America/New_York") for s in self.stamps])
+        return type("T", (), {"earnings_dates": pd.DataFrame({"Reported EPS": 1.0}, index=idx)})()
+
+
+def test_a_past_report_outside_finnhubs_window_comes_from_yfinance(live_finnhub, monkeypatch):
+    import midas.tools.market_data as md
+
+    _fake_calendar(monkeypatch, [{"date": "2027-01-25"}])  # the free tier keeps ~a month back
+    yf = _FakeYF(["2027-01-12 08:00", "2026-10-13 05:00", "2026-07-16 06:00"])
+    monkeypatch.setattr(md, "_yf", lambda: yf)
+    result = fn.get_earnings_dates("UNH", today=date(2026, 11, 16))
+    assert result.source == "finnhub+yfinance"
+    assert result.data["last_report_date"] == "2026-10-13"  # the last PAST row, not the estimate
+    assert result.data["next_report_date"] == "2027-01-25"  # the calendar's confirmed date wins
+    assert yf.asked == ["UNH"]
+
+
+def test_yfinance_is_not_asked_when_the_calendar_has_the_report(live_finnhub, monkeypatch):
+    import midas.tools.market_data as md
+
+    _fake_calendar(monkeypatch, [{"date": "2027-01-28"}, {"date": "2026-10-23"}])
+    yf = _FakeYF(["2026-10-23 07:00"])
+    monkeypatch.setattr(md, "_yf", lambda: yf)
+    result = fn.get_earnings_dates("AXP", today=date(2026, 11, 16))
+    assert result.source == "finnhub" and yf.asked == []
+
+
+def test_a_failing_fallback_leaves_the_last_date_unknown(live_finnhub, monkeypatch):
+    import midas.tools.market_data as md
+
+    _fake_calendar(monkeypatch, [{"date": "2026-11-17"}])
+    monkeypatch.setattr(md, "_yf", lambda: _FakeYF([], fail=True))
+    data = fn.get_earnings_dates("NVDA", today=date(2026, 11, 16)).data
+    assert data["last_report_date"] is None and data["next_report_date"] == "2026-11-17"
+
+
 def test_the_demo_fixture_has_both_dates(monkeypatch):
     monkeypatch.setattr(settings, "demo_mode", True)  # never the live calendar for ACME
     data = fn.get_earnings_dates("ACME").data
