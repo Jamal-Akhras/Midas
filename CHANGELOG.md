@@ -8,8 +8,10 @@ not yet cut a release, so everything sits under Unreleased.
 
 ### Added
 - Exact earnings dates from the calendar: a code-only tool
-  (`get_earnings_dates`, Finnhub's calendar 200 days back and 120 ahead)
-  gives the last report date and the next one. The technical block carries
+  (`get_earnings_dates`, Finnhub's calendar 200 days back and 120 ahead,
+  with yfinance filling the last report date when the free calendar's
+  month of history has none) gives the last report date and the next one.
+  The technical block carries
   both as days, a gap within three days of a report is named
   post-earnings, the screener's facts line names a report inside 30 days
   either side, and the entry window and the earnings review trigger read
