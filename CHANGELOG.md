@@ -7,6 +7,10 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- `python -m midas ...` runs the CLI without the launcher binary pip writes
+  into the Scripts folder, and `scripts\check.cmd` takes a `python.exe` path
+  as its first argument. On 2026-11-16 Windows Smart App Control refused
+  that launcher, which had stopped the monitor loop and the scheduled checks.
 - Exact earnings dates from the calendar: a code-only tool
   (`get_earnings_dates`, Finnhub's calendar 200 days back and 120 ahead,
   with yfinance filling the last report date when the free calendar's

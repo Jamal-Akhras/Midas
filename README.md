@@ -86,6 +86,11 @@ Add real keys in `.env` (see `.env.example`) to leave demo mode. Any one
 model key enables real AI; Alpaca/Finnhub/Brave keys enable real data.
 Optionally put [Tollgate](docs/tollgate.md) in front of the model calls.
 
+Every `midas ...` command also runs as `python -m midas ...`: the same CLI
+without the launcher binary pip writes into the Scripts folder, for a machine
+whose application-control policy (Windows Smart App Control) refuses that
+binary. `scripts\check.cmd` takes a `python.exe` path for the same reason.
+
 ## The committee
 
 | Stage | Actor | Kind |

@@ -6,16 +6,20 @@ rem Places no orders and calls no model through the router. Meant for a
 rem scheduler (Windows Task Scheduler: 09:00 local plus hourly through the
 rem US session on weekdays) but fine by hand.
 rem
-rem   scripts\check.cmd [path\to\midas.exe] [compact]
+rem   scripts\check.cmd [path\to\midas.exe | path\to\python.exe] [compact]
 rem
 rem The first argument is for schedulers that run without the Python
-rem environment on PATH; by default `midas` is taken from PATH. "compact"
+rem environment on PATH; by default `midas` is taken from PATH. A python.exe
+rem runs the package as a module (python -m midas), which needs no launcher
+rem binary: Windows Smart App Control blocked the pip launcher on 2026-11-16.
+rem "compact"
 rem sends the hourly form of the brief (a few lines, review only when
 rem something happened); the morning and first in-session briefs stay full.
 setlocal
 cd /d "%~dp0.."
-set "MIDAS=%~1"
-if "%MIDAS%"=="" set "MIDAS=midas"
+set "RUN=midas"
+if not "%~1"=="" set "RUN="%~1""
+if /i "%~nx1"=="python.exe" set "RUN="%~1" -m midas"
 set "MODE="
 if /i "%~2"=="compact" set "MODE=--compact"
 set "OUT=logs\checks"
@@ -26,18 +30,18 @@ set "FILE=%OUT%\%STAMP%.txt"
   echo === midas check %STAMP% ^(machine local time^) ===
   echo.
   echo --- positions ---
-  "%MIDAS%" positions
+  %RUN% positions
   echo.
   echo --- audit, last 30 events ---
-  "%MIDAS%" audit --limit 30
+  %RUN% audit --limit 30
   echo.
   echo --- stats ---
-  "%MIDAS%" stats
+  %RUN% stats
 ) > "%FILE%" 2>&1
 copy /y "%FILE%" "%OUT%\latest.txt" >nul
 echo wrote %FILE%
 rem The brief exits 1 (and says so in its file) until TELEGRAM_BOT_TOKEN and
 rem TELEGRAM_CHAT_ID are set in .env; the report above is written either way.
-"%MIDAS%" brief --send --review %MODE% --report "%FILE%" > "%OUT%\%STAMP%.brief.txt" 2>&1
+%RUN% brief --send --review %MODE% --report "%FILE%" > "%OUT%\%STAMP%.brief.txt" 2>&1
 copy /y "%OUT%\%STAMP%.brief.txt" "%OUT%\latest.brief.txt" >nul
 echo wrote %OUT%\%STAMP%.brief.txt
