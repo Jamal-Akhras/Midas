@@ -156,7 +156,7 @@ def technical_block(
     `earnings` is the calendar tool's record (last/next report dates): the
     block carries both as days, and a gap inside `EARNINGS_GAP_DAYS` of the
     last report is the report's."""
-    from midas.pipeline.setup_gate import code_setup
+    from midas.pipeline.setup_gate import code_setup, structure_levels
 
     today = today or date.today()
     last_report = parse_earnings_date((earnings or {}).get("last_report_date"))
@@ -235,6 +235,7 @@ def technical_block(
         "days_to_earnings": (next_report - today).days if next_report else None,
     }
     block["setup"], block["setup_note"] = code_setup(block)
+    block["levels"] = structure_levels(block)
     return block
 
 
@@ -381,7 +382,11 @@ def screen_context_content(
             "the code's own label (see setup_note), `swing_low` is the lowest low since the "
             "20-day high (the structural stop goes under it), `high_20d` is the first "
             "target's reference, `atr14` is one day's range (a stop inside it is noise), "
-            "`reclaim` is a close back above the 10-day mean and the prior close"
+            "`reclaim` is a close back above the 10-day mean and the prior close; `levels` "
+            "are the code's own stop (under the swing low or the gap bar's low, never "
+            "nearer than the minimum ATR distance), first target (the 20-day high, when one "
+            "is overhead) and the reward-to-risk between them from the last close - the "
+            "verdict's levels are checked against the same arithmetic"
         )
     failures = setup_gate(tech, str((screen or {}).get("setup") or "")) if tech else []
     if tech is None:

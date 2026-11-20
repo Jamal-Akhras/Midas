@@ -6,7 +6,9 @@ fails to be a swing setup at all. A chart below its 50-day average, too
 far off its 20-day high, or down too much in five sessions is in a
 downtrend, not a pullback, whatever base it broke out of last month; a
 "pullback" on expanding volume is distribution; a pullback that has not
-closed back above its 10-day mean and the prior close is still falling.
+closed back above its 10-day mean and the prior close is still falling;
+one whose 20-day high is nearer than the stop is far has no room; a
+candidate reporting inside the entry window is a bet on the report.
 
 The gate removes candidates; it never adds one, and it never punishes
 missing data - an unknown technical state passes, and the committee is
@@ -116,6 +118,50 @@ def code_setup(technical: dict | None) -> tuple[str, str]:
     return "pullback-in-uptrend", head
 
 
+def structure_levels(technical: dict | None) -> dict | None:
+    """The levels the chart itself names, from the last completed close:
+    the stop under the swing low (a pullback) or the gap bar's low (a
+    gap-and-hold), never nearer than MIN_STOP_ATR; the first target at
+    the 20-day high when one is overhead; the reward-to-risk between
+    them. None where no code setup describes the chart or the ATR is
+    unknown. 2026-11-20: ten of fifteen committees ended at the verdict
+    sanity gate on arithmetic these numbers already answered."""
+    if not technical or technical.get("setup") not in CODE_SETUPS:
+        return None
+    try:
+        close = float(technical["close"])
+        atr = float(technical["atr14"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if close <= 0 or atr <= 0:
+        return None
+    if technical["setup"] == "pullback-in-uptrend":
+        raw, basis = (technical.get("swing_low") or {}).get("price"), "swing low"
+    else:
+        raw, basis = (technical.get("last_gap") or {}).get("low"), "gap bar low"
+    if raw is None:
+        return None
+    floor = max(float(settings.min_stop_atr), 0.0)
+    stop = float(raw)
+    if floor > 0 and close - floor * atr < stop:
+        stop, basis = close - floor * atr, f"{floor:g} ATR under the close"
+    if stop >= close:
+        return None
+    high = (technical.get("high_20d") or {}).get("price")
+    target = float(high) if high is not None and float(high) > close else None
+    return {
+        "entry_ref": round(close, 4),
+        "stop": round(stop, 2),
+        "stop_basis": basis,
+        "stop_atr": round((close - stop) / atr, 2),
+        "target": round(target, 2) if target is not None else None,
+        "target_basis": "20-day high" if target is not None else None,
+        "reward_to_risk": (
+            round((target - close) / (close - stop), 2) if target is not None else None
+        ),
+    }
+
+
 def facts_line(ticker: str, technical: dict | None, score: float | None = None) -> str:
     """One line per ticker for the screener: the code's setup label and the
     numbers behind it. The screener ranks and explains; it does not label."""
@@ -132,6 +178,9 @@ def facts_line(ticker: str, technical: dict | None, score: float | None = None) 
         parts.append("reclaimed")
     elif technical.get("reclaim") is False:
         parts.append(f"no reclaim yet ({_reclaim_miss(technical, long=False)})")
+    room = (technical.get("levels") or {}).get("reward_to_risk")
+    if room is not None and label == "pullback-in-uptrend":
+        parts.append(f"room {float(room):.1f}R to the 20d high")
     atr_pct = technical.get("atr14_pct")
     if atr_pct is not None:
         parts.append(f"ATR {float(atr_pct):.1f}%")
@@ -187,6 +236,29 @@ def setup_gate(technical: dict | None, setup: str = "") -> list[str]:
         failures.append(
             f"no reclaim yet: {_reclaim_miss(technical, long=True)} - the pullback is still "
             "falling; a setup needs a close above the 10-day and the prior close"
+        )
+    levels = technical.get("levels") or {}
+    room = levels.get("reward_to_risk")
+    floor = float(settings.min_reward_to_risk)
+    if (
+        code_label == "pullback-in-uptrend"
+        and settings.setup_gate_require_room
+        and floor > 0
+        and room is not None
+        and float(room) < floor
+    ):
+        failures.append(
+            f"no room: the 20-day high {_g(levels.get('target'))} is {float(room):.2f} times "
+            f"the risk from the close {_g(levels.get('entry_ref'))} with the stop at "
+            f"{_g(levels.get('stop'))} ({levels.get('stop_basis')}; minimum {floor:g}) - the "
+            "retest does not pay for the stop"
+        )
+    window = int(settings.entry_earnings_blackout_days)
+    ahead = technical.get("days_to_earnings")
+    if window > 0 and ahead is not None and 0 <= int(ahead) <= window:
+        failures.append(
+            f"earnings in {int(ahead)} day(s) ({technical.get('next_earnings_date')}), inside "
+            f"the {window}-day entry window - a swing entry here is a bet on the report"
         )
     if code_label == "none" and not failures:
         failures.append(f"no code-defined setup ({technical.get('setup_note') or 'no setup'})")

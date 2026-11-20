@@ -180,7 +180,7 @@ def test_the_facts_line_is_what_the_screener_reads():
     tech = technical_block(pullback_bars(), today=TODAY, benchmark_bars=_run([100.0] * 60))
     assert facts_line("AXP", tech, score=99.4) == (
         "AXP 99: pullback-in-uptrend; 4.7% off the 20d high; no reclaim yet (close 122 under "
-        "its 10-day 125); ATR 1.6%; RS20 vs SPY +2.1%"
+        "its 10-day 125); room 6.0R to the 20d high; ATR 1.6%; RS20 vs SPY +2.1%"
     )
     assert facts_line("DUNE", technical_block(crash_bars(), today=TODAY)).startswith(
         "DUNE: none (below its 50-day average"

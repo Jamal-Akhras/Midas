@@ -156,6 +156,20 @@ def screen_task_text(
             f"or down more than {settings.setup_gate_max_5d_drop_pct:.0f}% in five sessions "
             "is dropped in code; labelling one as a setup wastes the slot."
         )
+        extra = []
+        if settings.setup_gate_require_reclaim:
+            extra.append("a pullback with no reclaim yet")
+        if settings.setup_gate_require_room and settings.min_reward_to_risk > 0:
+            extra.append(
+                f"a pullback whose room to the 20-day high is under "
+                f"{settings.min_reward_to_risk:g}R (the facts line states the room)"
+            )
+        if settings.entry_earnings_blackout_days > 0:
+            extra.append(
+                f"any name with earnings inside {settings.entry_earnings_blackout_days} days"
+            )
+        if extra:
+            lines.append("The gate also drops: " + "; ".join(extra) + ".")
     return "\n".join(lines)
 
 
