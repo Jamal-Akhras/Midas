@@ -1805,6 +1805,10 @@ def _run_monitor_pass(
             logger.exception("standing stop sync failed")
         db.commit()
         due = [(p.id, trig, reason) for p, trig, reason in due_positions(db)]
+        # the stop layer's pass count and its pending/cleared lines are written
+        # in there: without this commit every pass counted 'one of two' and
+        # an ordinary stop never confirmed (SNPS, 2026-11-17 to 11-19)
+        db.commit()
 
     def _review(position_id: Any, trigger: CheckpointTrigger, reason: str) -> None:
         try:

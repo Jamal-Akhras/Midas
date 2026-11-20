@@ -200,3 +200,31 @@ def test_minutes_since_open_reads_the_new_york_clock(monkeypatch):
         monitor, "utcnow", lambda: datetime(2026, 11, 12, 15, 4, tzinfo=timezone.utc)
     )
     assert real() == 34.0
+
+
+# ---------- the count lives across passes ----------
+
+
+def test_the_breach_count_survives_between_monitor_passes(factory, demo_router, monkeypatch):
+    """2026-11-20: SNPS sat under its 435 stop on three sessions and was
+    never sold. The pass counted the breach in a session it closed without
+    committing, so every pass counted 'one of two' and wrote no line."""
+    from midas.models import PositionStatus
+
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "breakeven_at_r", 0.0)  # the ratchet is not the subject
+    monkeypatch.setattr(monitor, "maybe_portfolio_review", lambda *a, **k: None)
+    with factory() as db:
+        pid = _position(db, "ACME").id
+        db.commit()
+    _at(monkeypatch, minutes_since_open=60, price=94.0)
+    monitor.run_monitor_once(factory, demo_router)
+    with factory() as db:
+        assert _breaches(db)[str(pid)]["count"] == 1
+        assert len(_events(db, "stop.breach_pending")) == 1
+        assert db.get(Position, pid).status == PositionStatus.open
+    monitor.run_monitor_once(factory, demo_router)
+    with factory() as db:
+        assert db.get(Position, pid).status == PositionStatus.closed
+        (exit_note,) = _events(db, "stop.breach_exit")
+        assert "confirmed on 2 consecutive passes" in exit_note
