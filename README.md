@@ -95,10 +95,10 @@ binary. `scripts\check.cmd` takes a `python.exe` path for the same reason.
 
 | Stage | Actor | Kind |
 |---|---|---|
-| Chart facts | code | deterministic: the technical block names the setup (pullback-in-uptrend, gap-and-hold, none) and its structure - swing low, 20-day high, ATR, last gap (post-earnings when the calendar says so), reclaim, relative strength, days since/until earnings |
+| Chart facts | code | deterministic: the technical block names the setup (pullback-in-uptrend, gap-and-hold, none) and its structure - swing low, 20-day high, ATR, last gap (post-earnings when the calendar says so), reclaim, relative strength, days since/until earnings - and its `levels`: the structural stop, the first target and the reward-to-risk between them |
 | Universe screen | Screener Agent, given the chart facts | LLM + market-data tools: ranks and explains; the setup label stays the code's |
 | Price/volume floors | code | deterministic |
-| Setup gate | code | deterministic: the chart checked against its own label; a pullback not yet reclaimed is dropped |
+| Setup gate | code | deterministic: the chart checked against its own label; a pullback not yet reclaimed, a pullback with no room to its 20-day high, and a name reporting inside the entry window are dropped |
 | Fundamentals | Earnings/Fundamentals Agent | LLM + earnings/estimates tools |
 | Deep research | Deep Research Agent | LLM + EDGAR, insiders, web search, page fetch |
 | Catalysts | Catalyst/News Agent | LLM + news/earnings tools |
@@ -108,8 +108,8 @@ binary. `scripts\check.cmd` takes a `python.exe` path for the same reason.
 | Option structure | code generates candidates -> LLM assist picks -> code re-validates | mixed |
 | Risk & sizing | risk engine | **deterministic code only** |
 | Verdict | Investor Agent (risk check is binding) | LLM, high-tier models |
-| Verdict sanity | code: entry zone, stop (incl. at least one ATR away), targets, reward-to-risk and the earnings window against the live quote and the run's record | deterministic |
-| Execution | paper broker + execution-time risk re-check | code |
+| Verdict sanity | code: an entry zone that can fill from the last close up, the stop at least one ATR under the lowest fill, a pullback's first target at the retest of its high, reward-to-risk and the earnings window, against the live quote and the run's record | deterministic |
+| Execution | paper broker + execution-time risk re-check; a shares entry fills only inside its zone, at or above the prior close, and not while SPY is falling hard | code |
 | Stop layer | code: disaster floor at once; ordinary breaches wait out the opening guard and need consecutive passes | deterministic |
 | Premarket gap review | Investor Agent, premarket, with news: hold, exit at the open, or raise the stop | LLM, bounded by code |
 | Re-evaluation | Investor Agent on schedule + events (earnings within 7 days, DTE decay) | LLM + tools |
@@ -200,8 +200,18 @@ trade verdict must declare `earnings_play` or rule no_trade, and an
 earnings play is sized at half risk. The setup label a committee judges
 is the code's own, from completed bars; a pullback that has not closed
 back above its 10-day mean and the prior close is dropped by the gate
-(`SETUP_GATE_REQUIRE_RECLAIM`), and the daily cycle waits
-`AUTO_CYCLE_AFTER_OPEN_MINUTES` after the open. Stop-breach exits are code with an opening
+(`SETUP_GATE_REQUIRE_RECLAIM`), as is a pullback whose 20-day high is
+nearer than `MIN_REWARD_TO_RISK` times its structural stop distance
+(`SETUP_GATE_REQUIRE_ROOM`) and any candidate reporting inside the entry
+window; the daily cycle waits `AUTO_CYCLE_AFTER_OPEN_MINUTES` after the
+open. Entries are bought on strength (`ENTRY_REQUIRE_STRENGTH`): the
+executor fills a shares entry only inside its zone and at or above the
+prior close, and not while SPY is down more than
+`ENTRY_MAX_INDEX_DROP_PCT` on the day; a zone that cannot fill that way
+is rejected at the verdict. Half size (an earnings play, a risk-off
+regime) halves the notional cap as well as the risk budget. A trim that
+would leave less than `TRIM_MIN_REMAINDER_USD` is refused: a small
+position is held or sold. Stop-breach exits are code with an opening
 guard: a breach past the disaster floor exits at once; an ordinary breach
 in the first `STOP_OPENING_GUARD_MINUTES` only logs, and after that it must
 hold on `STOP_CONFIRMATION_PASSES` consecutive passes. A model may raise a

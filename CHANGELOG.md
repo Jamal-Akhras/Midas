@@ -7,6 +7,23 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- Entry on strength (`ENTRY_REQUIRE_STRENGTH`, `ENTRY_MAX_INDEX_DROP_PCT`): the
+  executor fills a shares entry only inside its zone, at or above the prior
+  close, and not while SPY is down more than the limit on the day; otherwise
+  the thesis waits. The verdict checks reject a zone that cannot fill that
+  way (below the last close, or a single price), and cap a pullback's first
+  target at the retest of its 20-day high. SNPS, WFC and INTU (2026-11-13 to
+  11-17) were all bought below the prior close on falling days.
+- The technical block carries `levels` (structural stop, first target, the
+  reward-to-risk between them), the screener's facts line states the room,
+  and the setup gate drops a pullback with no room
+  (`SETUP_GATE_REQUIRE_ROOM`) and any candidate reporting inside the entry
+  window, before a committee is spent on it.
+- `TRIM_MIN_REMAINDER_USD`: a trim that would leave less is refused; the
+  portfolio manager and the re-evaluator are told `trim_allowed`.
+- Post-mortems are handed `entry_facts` and name what their lesson is about;
+  a stop lesson reaches later committees only when the stop was inside one
+  ATR of the fill, and post-mortems written before this are not fed.
 - `python -m midas ...` runs the CLI without the launcher binary pip writes
   into the Scripts folder, and `scripts\check.cmd` takes a `python.exe` path
   as its first argument. On 2026-11-16 Windows Smart App Control refused
@@ -140,6 +157,16 @@ not yet cut a release, so everything sits under Unreleased.
   `cost.divergence` audit event when they disagree; `docs/tollgate.md`.
 
 ### Changed
+- The stop-distance check measures from the lowest fill the entry zone
+  allows, not from the zone high (INTU filled a fifth of an ATR from its
+  stop). Half size halves the notional cap as well as the risk budget. A
+  position whose verdict declared an earnings play is no longer sent to
+  review for its own earnings. A trim the floor refused is not logged as a
+  portfolio action.
+- Prompts: the investor is told entries fill on strength from the last
+  close up, to start from the code's levels, and that a price invalidator
+  is the stop; the portfolio manager and the re-evaluator are told the stop
+  is code's and to check a price invalidator against the mark.
 - The catalyst prompt admits only dated scheduled events and disclosed
   corporate actions; analyst notes, reiterations and the price move itself
   are not catalysts. The investor places the stop at the structural level
@@ -165,6 +192,10 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- An ordinary stop could never confirm: the monitor pass counted a breach
+  in a session it closed without committing, so every pass counted "one of
+  two" and wrote no pending line. SNPS sat under its stop on three sessions
+  (2026-11-17 to 11-19); only the disaster floor and the agents could exit.
 - A thesis the auto-cycle approved waited for the next monitor pass, up
   to an interval later, before its first entry attempt. The pass now runs
   the entry executor again after the cycle, under the same session,
