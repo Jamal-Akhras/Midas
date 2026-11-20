@@ -255,6 +255,22 @@ class Settings(BaseSettings):
     min_stop_atr: float = 1.0
     entry_earnings_blackout_days: int = 7
 
+    # --- entry on strength (2026-11-20) ---
+    # SNPS, WFC and INTU were all bought below the prior close, on the day
+    # the reclaim the gate had asked for failed. The executor fills a
+    # shares entry only inside its zone and at or above the prior close,
+    # and the verdict checks reject a zone that cannot fill that way. No
+    # new long while SPY is down more than this on the day (0 = off).
+    entry_require_strength: bool = True
+    entry_max_index_drop_pct: float = 0.5
+    # The setup gate also drops a candidate with earnings inside the entry
+    # window, and a pullback whose 20-day high is nearer than
+    # MIN_REWARD_TO_RISK times the structural stop distance (no room).
+    setup_gate_require_room: bool = True
+    # A trim that would leave less than this in the position is refused:
+    # at small slot sizes the choice is hold or exit (0 = off).
+    trim_min_remainder_usd: float = 75.0
+
     # --- portfolio review guard (2026-11-12) ---
     # The PM exited AXP 24 seconds after the committee bought it, on the
     # bear case the committee had just weighed. A position younger than
@@ -625,6 +641,31 @@ EDITABLE_SETTINGS: dict[str, dict] = {
     "ENTRY_EARNINGS_BLACKOUT_DAYS": {
         "attr": "entry_earnings_blackout_days",
         "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    # --- entry on strength (2026-11-20) ---
+    "ENTRY_REQUIRE_STRENGTH": {
+        "attr": "entry_require_strength",
+        "type": "bool",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "ENTRY_MAX_INDEX_DROP_PCT": {
+        "attr": "entry_max_index_drop_pct",
+        "type": "float",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "SETUP_GATE_REQUIRE_ROOM": {
+        "attr": "setup_gate_require_room",
+        "type": "bool",
+        "group": "universe",
+        "fingerprint": True,
+    },
+    "TRIM_MIN_REMAINDER_USD": {
+        "attr": "trim_min_remainder_usd",
+        "type": "float",
         "group": "risk",
         "fingerprint": True,
     },

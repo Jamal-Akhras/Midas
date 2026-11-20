@@ -945,9 +945,12 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
         gate_ctx = ToolContext(db, run_id=run_id, ticker=ticker)
         live = float(gate_ctx.executor(TOOLS)("get_quote", {"ticker": ticker})["data"]["price"])
         _sc = existing_artifact(db, run_id, ArtifactType.screen_context)
-        _atr = ((_sc.content.get("technical") or {}) if _sc is not None else {}).get("atr14")
+        _tech = (_sc.content.get("technical") or {}) if _sc is not None else {}
+        _atr = _tech.get("atr14")
         _earnings_at = earnings.days_away(db, run_id)
-        issues = verdict_checks.problems(verdict, live, atr=_atr, earnings=_earnings_at)
+        issues = verdict_checks.problems(
+            verdict, live, atr=_atr, earnings=_earnings_at, technical=_tech
+        )
         if issues:
             record_event(
                 db,
@@ -969,19 +972,25 @@ def _run_stages(session_factory, router, ticker: str, run_id) -> CommitteeResult
                 extra_context=(
                     "YOUR PREVIOUS VERDICT WAS REJECTED by the deterministic sanity gate: "
                     + "; ".join(issues)
-                    + f". The live quote is ${live:.2f}. Entry zone within 15% of it, stop "
-                    "2-25% beyond the entry on the thesis side and at least "
-                    f"{settings.min_stop_atr:g} ATR from it (the technical block's atr14; put "
-                    "it under the swing low), targets beyond the entry, first target at least "
-                    f"{settings.min_reward_to_risk:g}x the stop distance from the entry. Inside "
-                    f"the {settings.entry_earnings_blackout_days}-day earnings window a trade "
-                    "needs earnings_play true (half size) or no_trade. Fix the levels or rule "
-                    "no_trade."
+                    + f". The live quote is ${live:.2f}. The order fills only inside the "
+                    "entry zone and at or above the prior close, so the zone runs from the "
+                    "last close up; the stop sits under the swing low, at least "
+                    f"{settings.min_stop_atr:g} ATR (atr14) below the lowest fill the zone "
+                    "allows and 2-25% below the zone high; the first target is the technical "
+                    "block's `levels.target` (for a pullback, the retest of the 20-day high) "
+                    f"and must pay {settings.min_reward_to_risk:g}x the stop distance from "
+                    "the zone high. Inside the "
+                    f"{settings.entry_earnings_blackout_days}-day earnings window a trade "
+                    "needs earnings_play true (half size) or no_trade. If the structure does "
+                    "not pay, the answer is no_trade: do not lower the zone or stretch the "
+                    "target to make the numbers work."
                 ),
                 force_new_version=True,
             )
             gate_ctx.stamp_artifact(verdict_art.id)
-            issues = verdict_checks.problems(verdict, live, atr=_atr, earnings=_earnings_at)
+            issues = verdict_checks.problems(
+                verdict, live, atr=_atr, earnings=_earnings_at, technical=_tech
+            )
             if issues:
                 record_event(
                     db,

@@ -304,6 +304,7 @@ def check_shares_trade(
             * settings.max_notional_pct_per_trade
             / 100
             * throttle
+            * scale  # half size is half the position, not half a risk budget
             / max(entry_price, 0.01)
         )
         notional_cap_qty = round(raw_cap, 3) if settings.fractional_shares else int(raw_cap)
@@ -314,7 +315,11 @@ def check_shares_trade(
                 "notional_cap",
                 True,
                 f"capped to {max_qty} shares",
-                f"<= {settings.max_notional_pct_per_trade}% of equity notional",
+                (
+                    f"<= {settings.max_notional_pct_per_trade}% of equity notional"
+                    if scale == 1.0
+                    else f"<= {settings.max_notional_pct_per_trade}% x {scale:g} of equity notional"
+                ),
             )
         if max_qty <= 0:
             ok = _check(

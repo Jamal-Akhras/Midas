@@ -138,3 +138,6 @@ def _pin_market_state(monkeypatch):
     # turns the ATR rule on)
     monkeypatch.setattr(_config.settings, "min_reward_to_risk", 0.0)
     monkeypatch.setattr(_config.settings, "min_stop_atr", 0.0)
+    # and single-price entry zones written before entries had to be bought on
+    # strength (tests/test_entry_strength.py turns the rule on)
+    monkeypatch.setattr(_config.settings, "entry_require_strength", False)

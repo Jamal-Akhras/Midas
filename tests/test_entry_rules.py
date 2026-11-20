@@ -52,14 +52,14 @@ def _verdict(**kw) -> VerdictOutput:
 
 def test_a_stop_inside_one_atr_is_rejected(monkeypatch):
     monkeypatch.setattr(settings, "min_stop_atr", 1.0)
-    v = _verdict(stop_price=315.0)  # 8 under the worst fill of 323
+    v = _verdict(stop_price=315.0)  # 5 under the lowest fill the zone allows, 320
     (problem,) = verdict_checks.problems(v, 322.0, atr=12.0)
     assert problem == (
-        "stop 315 is 0.67 ATR from the entry 323 (14-day ATR 12; minimum 1 ATR) - a stop "
-        "inside one day's range is hit by noise, not by a broken thesis; put it under the "
-        "swing low in the technical block"
+        "stop 315 is 0.42 ATR from the lowest fill 320 (14-day ATR 12; minimum 1 ATR) - a "
+        "stop inside one day's range is hit by noise, not by a broken thesis; put it under "
+        "the swing low in the technical block"
     )
-    assert verdict_checks.problems(v, 322.0, atr=6.0) == []
+    assert verdict_checks.problems(v, 322.0, atr=4.0) == []
     assert verdict_checks.problems(v, 322.0) == []  # no ATR on record: not checked
     monkeypatch.setattr(settings, "min_stop_atr", 0.0)
     assert verdict_checks.problems(v, 322.0, atr=12.0) == []

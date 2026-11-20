@@ -132,7 +132,7 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
                 f"cannot verify entry zone (quote failed: {type(exc).__name__}); will retry"
             ) from exc
         sector = str(quote.get("sector") or "")
-        _gate_shares_entry(db, thesis, spot)
+        _gate_shares_entry(db, thesis, spot, prev_close=quote.get("prev_close"))
         from midas.pipeline import earnings as _earnings
 
         # an entry inside the earnings window is an earnings play (the
@@ -201,11 +201,32 @@ def execute_thesis(db: Session, thesis: TradeThesis, *, approved_by: str) -> Ord
     return order
 
 
-def _gate_shares_entry(db: Session, thesis: TradeThesis, spot: float) -> None:
+def _index_day_change_pct() -> float | None:
+    """SPY against its prior close, in percent; None when the quote cannot
+    say (a feed failure never blocks an entry on its own)."""
+    try:
+        from midas.tools.market_data import get_quote
+
+        q = get_quote("SPY").data
+        price, prev = float(q["price"]), float(q.get("prev_close") or 0.0)
+    except Exception:
+        return None
+    return (price / prev - 1.0) * 100.0 if prev > 0 else None
+
+
+def _gate_shares_entry(
+    db: Session, thesis: TradeThesis, spot: float, *, prev_close: float | None = None
+) -> None:
     """The live quote decides whether a shares entry may go out NOW.
     Through the stop: the thesis is already invalidated and is rejected for
     good (buying it would be a stop-out in the making). Above the zone:
-    wait - the price may come back within the thesis's 5-day life."""
+    wait - the price may come back within the thesis's 5-day life.
+
+    Entry on strength (2026-11-20; SNPS, WFC and INTU were all bought
+    below the prior close, INTU under its zone and a fifth of an ATR from
+    its stop): also wait while the price is under the zone, under the
+    prior close (the reclaim the gate asked for is not holding today), or
+    while SPY is down more than ENTRY_MAX_INDEX_DROP_PCT on the day."""
     if thesis.stop_price and spot <= thesis.stop_price:
         thesis.status = ThesisStatus.rejected
         record_event(
@@ -234,6 +255,32 @@ def _gate_shares_entry(db: Session, thesis: TradeThesis, spot: float) -> None:
             f"awaiting entry zone: {thesis.ticker} {spot:g} above "
             f"{thesis.entry_zone_high:g}; re-checked each pass"
         )
+    if not settings.entry_require_strength:
+        return
+    if thesis.entry_zone_low and spot < thesis.entry_zone_low:
+        raise AwaitingEntryZone(
+            f"awaiting entry zone: {thesis.ticker} {spot:g} is below the zone "
+            f"{thesis.entry_zone_low:g}-{thesis.entry_zone_high:g} - the stop distance was "
+            "checked from the zone, and a fill under it is closer to the stop than the "
+            "thesis allows; re-checked each pass"
+        )
+    try:
+        prior = float(prev_close or 0.0)
+    except (TypeError, ValueError):
+        prior = 0.0
+    if prior > 0 and spot < prior:
+        raise AwaitingEntryZone(
+            f"awaiting strength: {thesis.ticker} {spot:g} is below the prior close {prior:g} "
+            "- the reclaim is not holding today; re-checked each pass"
+        )
+    limit = float(settings.entry_max_index_drop_pct)
+    if limit > 0:
+        change = _index_day_change_pct()
+        if change is not None and change < -limit:
+            raise AwaitingEntryZone(
+                f"awaiting the tape: SPY is down {abs(change):.1f}% today (limit {limit:g}%) "
+                "- no new long while the index is falling; re-checked each pass"
+            )
 
 
 def propose_or_execute_exit(

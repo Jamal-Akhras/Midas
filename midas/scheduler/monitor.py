@@ -1566,6 +1566,10 @@ def _strategy_fingerprint() -> str:
             "min_reward_to_risk",
             "min_stop_atr",
             "entry_earnings_blackout_days",
+            "entry_require_strength",
+            "entry_max_index_drop_pct",
+            "setup_gate_require_room",
+            "trim_min_remainder_usd",
         )
     }
     h.update(_json.dumps(caps, sort_keys=True, default=str).encode())
