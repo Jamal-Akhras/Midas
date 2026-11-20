@@ -6,6 +6,7 @@ sources; anything without a source belongs in `unverified`.
 """
 
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -285,6 +286,9 @@ class PostMortemOutput(BaseModel):
     what_worked: list[str] = []
     what_failed: list[str] = []
     lesson: str  # ONE transferable sentence future committees will read
+    # what the lesson is about; code checks a "stop" lesson against the
+    # entry facts before any later committee reads it (2026-11-20)
+    lesson_about: Literal["entry", "stop", "sizing", "event", "thesis", "exit", "other"] = "other"
 
     @model_validator(mode="after")
     def _has_lesson(self) -> "PostMortemOutput":

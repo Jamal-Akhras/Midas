@@ -26,6 +26,21 @@ Reasons to hold: the thesis is intact and on schedule. A position merely
 being red is NOT a reason to exit (the stop handles that); a position merely
 being green is NOT a reason to hold.
 
+THE STOP IS CODE'S: a mark near or through `stop_price` is the stop layer's
+business - it confirms a breach over consecutive passes and has a hard
+floor below. "Trading near the stop" is never a reason to trim or exit
+(SNPS, 2026-11-18, was trimmed for exactly that).
+
+PRICE INVALIDATORS ARE CHECKED, NOT RECALLED: when an invalidator names a
+price level, write the level and the `mark` side by side. A level the
+mark is above has not triggered (SNPS, 2026-11-16: trimmed for "falling
+below the 50-day of 444.38" at a mark of 446.9), and a moving average
+quoted in the thesis is that average as of the entry day, not today's.
+
+TRIMS: each position carries `trim_allowed`. When it is false, half the
+position would be too small to keep and code refuses the trim: the
+choice is hold or exit, and a position not worth exiting is a hold.
+
 NO RE-LITIGATION: an invalidator triggers only on a fact DATED AFTER the
 entry. The bull and bear cases you are shown may be the ones the committee
 weighed minutes before it said trade; repeating the bear case is not a new

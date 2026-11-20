@@ -30,33 +30,52 @@ Rules:
   the artifact they came from. Items that name none are opinion and
   carry no weight; a side whose case is mostly unsourced has not made a
   case, whatever its conviction number.
-- ENTRY DISCIPLINE: the entry zone is the price you would be HAPPY to pay,
-  not wherever the ticker happens to be trading. If the stock is extended
-  (large gap today, >10% in a week, far above its short-term average - use
-  the technical block's numbers, not impressions), set the entry zone at the
-  pullback level a patient buyer would wait for. A trade verdict whose entry
-  zone is below the current price becomes a resting limit order for 5
-  sessions - use it for pullback entries instead of no_trade. Buying the
-  high of a +8% day because the committee met that day is the canonical
-  error; the market reopens tomorrow.
-- STOP AND TARGET ARE STRUCTURE, NOT ROUND NUMBERS: the technical block
-  names the levels. The stop goes under `swing_low` (the lowest low since
-  the 20-day high) or just under the 50-day average - whichever proves
-  the setup wrong - and never closer to the entry than one `atr14` (a
-  stop inside one day's range is hit by noise; a code check rejects it).
-  The first target is `high_20d` or beyond, and must be at least 1.5
-  times the stop distance from the entry; a code check rejects a thinner
-  trade. If the structural stop is too far for a 1.5-to-1 target, the
-  setup is not there: no_trade.
+- ENTRY ON STRENGTH: the setup is bought while it is working, not while it
+  is failing. Code fills an entry only while the price is inside your
+  entry zone AND at or above the prior close (the reclaim still standing
+  today), and not while the index is falling hard; otherwise the order
+  waits, for up to 5 sessions. So the entry zone runs from the last close
+  in the technical block upward. A zone that sits below that close can
+  never fill, and a code check rejects it: in the week of 2026-11-13
+  three zones were set under the close to make the arithmetic work, and
+  all three filled on the day the reclaim failed. Keep the zone tight:
+  its top is the worst price you accept and the reward-to-risk is
+  measured from there. Chasing is still an error - if the chart is
+  extended the code label says so and the verdict is no_trade, not a
+  higher zone; the market reopens tomorrow.
+- STOP AND TARGET ARE STRUCTURE, NOT ROUND NUMBERS: the technical block's
+  `levels` gives the code's own stop (under `swing_low`, or under the
+  gap bar's low for a gap-and-hold, and never nearer than one `atr14`),
+  its first target (`high_20d`, when one is overhead) and the
+  reward-to-risk between them from the last close. Start from those
+  numbers. A code check measures your stop from the lowest fill your
+  zone allows (at least one ATR: a stop inside one day's range is hit by
+  noise) and your first target from the top of your zone (at least the
+  configured multiple of the stop distance, 1.5 unless the task says
+  otherwise). For a pullback the first target is the retest of the
+  20-day high; a further level is a second target, and a code check
+  rejects a first target stretched beyond it. If the structure does not
+  pay, the setup is not there: no_trade. Do not lower the zone or
+  stretch the target to make the arithmetic work.
+- INVALIDATORS AGREE WITH THE LEVELS: a price in "what invalidates this"
+  is the stop, or below it - never a level inside or above your own
+  entry zone (INTU, 2026-11-17: the zone's top was the level the thesis
+  called the invalidator, and the position was trimmed sixteen minutes
+  after it was bought). Every other invalidator is a dated fact or event
+  a reviewer can check, not a restatement of the stop.
 - THE SETUP LABEL IS THE CODE'S: `setup` and `setup_note` in the technical
   block say what the chart is; `reclaim` false means the pullback is
-  still falling and the gate will have dropped it. Judge the trade
-  against that label, not the screener's prose.
+  still falling and the gate will have dropped it, as it drops a
+  pullback with no room to its 20-day high and a name reporting inside
+  the entry window. Judge the trade against that label, not the
+  screener's prose.
 - EARNINGS WINDOW: a trade verdict with earnings inside the configured
-  entry window (the catalysts/fundamentals date; a code check applies it)
-  must set `earnings_play` true, which means the event IS the thesis, the
-  position is held through it, and code sizes it at half risk. If the
-  event is not the thesis, rule no_trade or set the entry for after it.
+  entry window (the calendar date in the technical block's
+  `next_earnings_date`, else the catalysts/fundamentals date; a code
+  check applies it) must set `earnings_play` true, which means the event
+  IS the thesis, the position is held through it, and code sizes it at
+  half the position. If the event is not the thesis, rule no_trade.
+  `earnings_play` is false whenever the report is outside the window.
 - "The price went up" is evidence of nothing. A thesis needs a CAUSE -
   earnings trajectory, a dated catalyst, a setup with a defined invalidation
   level - that would still be true if the ticker were flat this week.

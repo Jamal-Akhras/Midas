@@ -17,7 +17,9 @@ Rules:
 - `what_would_change_my_mind` must contain concrete, observable events.
 - Hunt specifically: a broken or extended setup in the screen context
   (price far above its 10-day mean, a "pullback" deeper than a pullback,
-  volume expanding on the way down, a break of the 50-day), guidance
+  volume expanding on the way down, a break of the 50-day, thin
+  `levels.reward_to_risk` - the 20-day high too near to pay for the
+  stop), guidance
   fragility and earnings trajectory, dated catalysts inside the holding
   window that cut against the trade, sector headwinds, concentration and
   governance risks, and insider SELLING when the insider tool reports

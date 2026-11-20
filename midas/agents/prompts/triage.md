@@ -9,7 +9,9 @@ Rules:
 - The screen_context document shows the setup the ticker was selected for
   and a code-computed technical block (extension vs the 10-day mean,
   pullback from the 20-day high, volume contraction, the swing low, the
-  ATR, the last volume gap, whether the pullback has been reclaimed). The
+  ATR, the last volume gap, whether the pullback has been reclaimed, and
+  `levels`: the code's own stop, first target and the reward-to-risk
+  between them). The
   block's `setup` and `setup_note` are the code's own label for the chart
   and outrank the screener's prose: a "post-earnings drift" is only one if
   the block shows a gap-and-hold. "No setup" means that block shows no

@@ -848,6 +848,8 @@ def run_post_mortems(
             )
             db.add(run)
             db.flush()
+            ledger = _position_record(db, position, thesis)
+            facts = _entry_facts(db, position, thesis, ledger["price_path"])
             record = render_content(
                 {
                     "thesis": {
@@ -872,7 +874,8 @@ def run_post_mortems(
                         "holding_days": outcome.holding_days,
                         "exit_kind": outcome.exit_kind,
                     },
-                    **_position_record(db, position, thesis),
+                    "entry_facts": facts,
+                    **ledger,
                     "record_note": (
                         "this is the whole record. If it does not say why the price "
                         "moved, the cause is not in the record - say so; never name an "
@@ -882,7 +885,7 @@ def run_post_mortems(
                 limit=12000,
             )
             try:
-                _, pm = run_agent_stage(
+                pm_art, pm = run_agent_stage(
                     db,
                     router,
                     run,
@@ -891,7 +894,15 @@ def run_post_mortems(
                     ticker=position.ticker,
                 )
                 run.status = RunStatus.done
-                lessons.append(pm.lesson)
+                grounded, why = lesson_grounded(pm.lesson_about, facts)
+                pm_art.content = {
+                    **pm_art.content,
+                    "entry_facts": facts,
+                    "lesson_grounded": grounded,
+                    "lesson_note": why,
+                }
+                if grounded:
+                    lessons.append(pm.lesson)
             except Exception:
                 logger.exception("post-mortem failed for %s", position.symbol)
                 run.status = RunStatus.failed
@@ -914,8 +925,10 @@ def _position_record(db: Session, position: Position, thesis: TradeThesis) -> di
     try:
         from midas.tools.market_data import get_daily_bars
 
-        span = max((closed - opened).days + 5, 10)
-        first = (opened - timedelta(days=1)).date().isoformat()
+        span = max((closed - opened).days + 9, 12)
+        # a few sessions before the entry: the prior close is what the fill
+        # is measured against, and a Monday entry has none the day before
+        first = (opened - timedelta(days=5)).date().isoformat()
         last = closed.date().isoformat()
         path = [
             {k: b.get(k) for k in ("date", "open", "high", "low", "close", "volume")}
@@ -962,16 +975,85 @@ def _position_record(db: Session, position: Position, thesis: TradeThesis) -> di
     return {"price_path": path, "orders": orders, "events": events, "reviews": reviews}
 
 
+def _entry_facts(
+    db: Session, position: Position, thesis: TradeThesis, path: list[dict[str, Any]] | str
+) -> dict[str, Any]:
+    """What the entry was, in numbers a lesson can be checked against: the
+    fill against the zone and the prior close, and the stop distance in
+    ATRs (the ATR the committee read). WFC and INTU, 2026-11-17: both
+    post-mortems said 'wider stop'; WFC's was 1.2 ATR and saved money,
+    INTU was filled 6.5% under the prior close and below its own zone."""
+    from midas.models import ArtifactType
+    from midas.pipeline.runner import existing_artifact
+
+    fill = float(position.avg_price or 0.0)
+    lo, hi = thesis.entry_zone_low, thesis.entry_zone_high
+    facts: dict[str, Any] = {
+        "fill": fill,
+        "zone": [lo, hi],
+        "stop": thesis.stop_price,
+        "fill_vs_zone": (
+            "below the zone"
+            if lo and fill < lo
+            else "above the zone"
+            if hi and fill > hi
+            else "inside the zone"
+        ),
+    }
+    entry_day = aware(position.opened_at).date().isoformat()
+    before = (
+        [b for b in path if str(b.get("date", ""))[:10] < entry_day and b.get("close")]
+        if isinstance(path, list)
+        else []
+    )
+    if before and fill > 0:
+        prior = float(before[-1]["close"])
+        facts["prior_close"] = prior
+        facts["fill_vs_prior_close_pct"] = round((fill / prior - 1.0) * 100.0, 2)
+    try:
+        sc = existing_artifact(db, thesis.run_id, ArtifactType.screen_context)
+        atr = float(((sc.content.get("technical") or {}) if sc else {}).get("atr14") or 0.0)
+    except Exception:
+        atr = 0.0
+    if atr > 0 and thesis.stop_price and fill > 0:
+        facts["stop_distance_atr"] = round(abs(fill - float(thesis.stop_price)) / atr, 2)
+    return facts
+
+
+def lesson_grounded(about: str, facts: dict[str, Any]) -> tuple[bool, str]:
+    """May this lesson be fed to later committees? A lesson about the stop
+    needs a stop that really was inside one ATR of the fill; anything else
+    the record cannot contradict in code, so it stands."""
+    if about != "stop":
+        return True, ""
+    distance = facts.get("stop_distance_atr")
+    if distance is None:
+        return False, "the stop distance in ATRs is unknown; a lesson about it is not grounded"
+    if float(distance) < 1.0:
+        return True, ""
+    return False, (
+        f"the stop was {float(distance):g} ATR from the fill - not a tight stop; the record "
+        "does not support a lesson about stop distance"
+    )
+
+
 def recent_lessons(db: Session, limit: int = 5) -> list[str]:
+    """The lessons later committees read: only post-mortems whose lesson
+    passed `lesson_grounded` (those written before 2026-11-20 carry no
+    mark and are not fed)."""
     from midas.models import ArtifactType
 
     arts = db.scalars(
         select(ResearchArtifact)
         .where(ResearchArtifact.artifact_type == ArtifactType.post_mortem)
         .order_by(ResearchArtifact.created_at.desc())
-        .limit(limit)
+        .limit(limit * 4)
     ).all()
-    return [a.content.get("lesson", "") for a in arts if a.content.get("lesson")]
+    return [
+        a.content["lesson"]
+        for a in arts
+        if a.content.get("lesson") and a.content.get("lesson_grounded") is True
+    ][:limit]
 
 
 def _us_market_hours() -> bool:

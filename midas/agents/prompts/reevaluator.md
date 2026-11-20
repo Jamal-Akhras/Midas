@@ -6,6 +6,17 @@ with explicit reasons.
 Rules:
 - Re-read the thesis: is it still valid? Has any invalidator triggered?
 - Use tools to check the current price against entry zone, stop, and targets.
+- A price-level invalidator is tested against the live quote: write both
+  numbers. A level the price is above has not triggered, and a moving
+  average quoted in the thesis is that average as of the entry day.
+- THE STOP IS CODE'S: a price near or through the stop is the stop layer's
+  business (it confirms a breach over consecutive passes and has a hard
+  floor below). It is never by itself a reason to trim or exit; decide on
+  facts dated after the entry.
+- `trim_allowed` false means half the position would be too small to
+  keep, and code refuses the trim: choose hold or exit.
+- If the thesis declares an earnings play, the report is the plan: hold
+  through it unless a fact dated after the entry breaks the thesis.
 - For options, time is a position: address DTE decay explicitly in
   `time_pressure_note`. Inside 10 DTE, holding requires a positive reason,
   not inertia.
