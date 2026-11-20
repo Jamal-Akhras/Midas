@@ -377,12 +377,11 @@ def execute_approved_exit(db: Session, approval: ApprovalRequest) -> Order:
     return order
 
 
-def _trim_qty(db: Session, position: Position) -> float | None:
-    """Half the position: three decimals for fractional shares, whole units
-    otherwise. None (audited) when the trim would over-sell, close the
-    position, or leave dust below MIN_SWING_NOTIONAL_USD - hold or exit are
-    the honest choices then. The old max(int(qty / 2), 1) sold a whole
-    share out of a 0.5-share position."""
+def _trim_plan(position: Position) -> tuple[float, float, float, float]:
+    """(trim qty, remainder qty, remainder in dollars, the dollar floor).
+    The floor is the larger of the dust rule and TRIM_MIN_REMAINDER_USD:
+    SNPS was trimmed from $128 to $63 to $30 in two reviews (2026-11-16,
+    2026-11-18), each above the $25 dust floor."""
     fractional = settings.fractional_shares and position.instrument == Instrument.shares
     qty = round(position.qty / 2, 3) if fractional else float(max(int(position.qty / 2), 1))
     qty = min(qty, position.qty)
@@ -390,7 +389,24 @@ def _trim_qty(db: Session, position: Position) -> float | None:
     multiplier = 100 if position.instrument == Instrument.option else 1
     price = position.last_mark_price or position.avg_price
     remainder_usd = remainder * price * multiplier
-    floor = float(settings.min_swing_notional_usd)
+    floor = max(float(settings.min_swing_notional_usd), float(settings.trim_min_remainder_usd))
+    return qty, remainder, remainder_usd, floor
+
+
+def trim_allowed(position: Position) -> bool:
+    """Would a trim of this position go through? The reviewers are told
+    before they decide, so a refused trim is not their only idea."""
+    qty, remainder, remainder_usd, floor = _trim_plan(position)
+    return qty > 0 and remainder > 0 and remainder_usd >= floor
+
+
+def _trim_qty(db: Session, position: Position) -> float | None:
+    """Half the position: three decimals for fractional shares, whole units
+    otherwise. None (audited) when the trim would over-sell, close the
+    position, or leave less than the floor (`_trim_plan`) - hold or exit
+    are the honest choices then. The old max(int(qty / 2), 1) sold a whole
+    share out of a 0.5-share position."""
+    qty, remainder, remainder_usd, floor = _trim_plan(position)
     if qty <= 0 or remainder <= 0 or remainder_usd < floor:
         logger.info(
             "%s: trim skipped - would leave %g (= $%.2f, floor $%.0f)",

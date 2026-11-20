@@ -374,6 +374,7 @@ def reevaluate_position(
                 "avg_price": position.avg_price,
                 "last_mark_price": position.last_mark_price,
                 "opened_at": str(position.opened_at),
+                "trim_allowed": executor.trim_allowed(position),
                 "option_detail": position.option_detail,
                 "trigger": trigger.value,
                 "trigger_reason": reason,
@@ -1419,6 +1420,9 @@ def maybe_portfolio_review(
                 "targets": thesis.targets if thesis else [],
                 "invalidators": thesis.invalidators if thesis else [],
                 "exit_allowed": guard is None,
+                # false: half of it would be too small to be a position - the
+                # choice is hold or exit (SNPS was trimmed to $30, 2026-11-18)
+                "trim_allowed": executor.trim_allowed(p),
                 "exit_guard": guard
                 or "exit/trim allowed: the position is old enough or facts newer than "
                 "its entry exist",
@@ -1487,13 +1491,18 @@ def maybe_portfolio_review(
                     payload={"decision": action.decision, "reasons": action.reasons},
                 )
                 continue
-            executor.propose_or_execute_exit(
+            routed = executor.propose_or_execute_exit(
                 db,
                 pos,
                 decision=action.decision,
                 reasons=action.reasons,
                 artifact_id=artifact.id,
             )
+            if routed is None:
+                # a trim the floor refused (exit.trim_skipped has the numbers):
+                # nothing was done, so nothing is logged as an action
+                results[action.ticker] = f"{action.decision} skipped (remainder under the floor)"
+                continue
             results[action.ticker] = f"{action.decision} routed (L{settings.autonomy_level})"
             record_event(
                 db,

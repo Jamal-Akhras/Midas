@@ -141,3 +141,6 @@ def _pin_market_state(monkeypatch):
     # and single-price entry zones written before entries had to be bought on
     # strength (tests/test_entry_strength.py turns the rule on)
     monkeypatch.setattr(_config.settings, "entry_require_strength", False)
+    # and positions of a few dozen dollars trimmed in half (tests/test_trim_floor.py
+    # turns the remainder floor on)
+    monkeypatch.setattr(_config.settings, "trim_min_remainder_usd", 0.0)
