@@ -258,3 +258,22 @@ def test_the_cycle_waits_for_the_first_hour(factory, demo_router, monkeypatch):
     monkeypatch.setattr(monitor, "_minutes_since_open", lambda: 75.0)
     assert monitor.maybe_auto_cycle(factory, demo_router) is not None
     assert calls == ["screen"]
+
+
+# ---------- a declared earnings play is not reviewed for its own earnings ----------
+
+
+def test_a_declared_earnings_play_is_not_reviewed_for_its_own_earnings(db, monkeypatch):
+    from midas.models import CheckpointTrigger
+    from tests.test_stop_guard import _position
+
+    monkeypatch.setattr(monitor, "_underlying_price", lambda db, p: 100.0)
+    monkeypatch.setattr(
+        monitor, "_earnings_proximity", lambda db, p: "earnings on 2026-11-19 (2 day(s) away)"
+    )
+    p = _position(db, "INTU")
+    assert [d[1] for d in monitor.due_positions(db)] == [CheckpointTrigger.earnings]
+    verdict = db.get(ResearchArtifact, db.get(TradeThesis, p.thesis_id).verdict_artifact_id)
+    verdict.content = {"earnings_play": True}
+    db.flush()
+    assert monitor.due_positions(db) == []  # the report is the plan the verdict declared

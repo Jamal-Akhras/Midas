@@ -127,6 +127,11 @@ def due_positions(db: Session) -> list[tuple[Position, CheckpointTrigger, str]]:
                 )
         # earnings inside the lookahead window (matters doubly for options)
         earnings_note = None if recently_reviewed else _earnings_proximity(db, p)
+        if earnings_note and _is_earnings_play(db, thesis):
+            # the verdict declared the report as the plan (and was sized at
+            # half for it): reviewing it for its own earnings sold half of
+            # INTU sixteen minutes after the entry (2026-11-17)
+            earnings_note = None
         if earnings_note:
             due.append((p, CheckpointTrigger.earnings, earnings_note))
             continue
@@ -252,6 +257,14 @@ def _earnings_proximity(db: Session, p: Position) -> str | None:
     if 0 <= days <= settings.earnings_lookahead_days:
         return f"earnings on {date_str} ({days} day(s) away)"
     return None
+
+
+def _is_earnings_play(db: Session, thesis: TradeThesis | None) -> bool:
+    """Did the verdict behind this thesis declare an earnings play?"""
+    if thesis is None or thesis.verdict_artifact_id is None:
+        return False
+    art = db.get(ResearchArtifact, thesis.verdict_artifact_id)
+    return bool(art is not None and (art.content or {}).get("earnings_play"))
 
 
 def _underlying_price(db: Session, p: Position) -> float | None:
