@@ -13,7 +13,7 @@ from typing import Any
 
 import pandas as pd
 
-from midas.research import intraday, strategies
+from midas.research import events, intraday, strategies
 from midas.research.data import PriceData
 from midas.research.metrics import Performance, summarize, trade_stats
 from midas.research.portfolio import simulate
@@ -24,6 +24,9 @@ WINDOWS = ("2020-01-01", "2022-01-01", "2024-01-01")
 ETF_COST_BPS = 5.0
 STOCK_COST_BPS = 10.0
 SURVIVORSHIP = "survivorship bias: today's constituents"
+CORE_BOOK = ("SPY", "QQQ", "EFA", "GLD", "IEF")  # the live CORE_UNIVERSE
+CORE_TREND_WINDOW = 200
+EVENT_MIN_UNIVERSE = 100  # names; fewer and a daily mean is a handful of stocks
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,27 @@ def catalogue(data: PriceData) -> list[Entry]:
         out.append(
             Entry("SPY 10-month SMA, monthly (Faber)", sim(strategies.sma_monthly(data, "SPY")))
         )
+    if data.has(*CORE_BOOK):
+        # The account, not the strategy: how much of it the core book runs and
+        # what the rest earns. The live book held idle cash at zero until
+        # 2026-11-23; the backtested rule pays the T-bill rate on it.
+        slices = strategies.tactical_sma(data, CORE_BOOK, window=CORE_TREND_WINDOW)
+        out.append(
+            Entry(
+                "Midas core 60%, idle cash at zero",
+                simulate(slices * 0.6, rets, data.cash_daily * 0.0, cost_bps=ETF_COST_BPS),
+                "the live account to 2026-11-23",
+            )
+        )
+        for share, note in ((0.6, ""), (0.85, "the live setting from 2026-11-23")):
+            out.append(
+                Entry(
+                    f"Midas core {share:.0%}, off-trend share and the rest in T-bills",
+                    sim(slices * share),
+                    note,
+                )
+            )
+        out.append(Entry("Midas core 100%, off-trend share in T-bills", sim(slices)))
     if data.has("SPY", "EFA", "AGG"):
         out.append(Entry("GEM dual momentum (SPY/EFA/AGG)", sim(strategies.dual_momentum(data))))
     gtaa = ("SPY", "EFA", "IEF", "VNQ", "DBC")
@@ -322,6 +346,10 @@ def _fmt(frame: pd.DataFrame, columns: Sequence[str]) -> str:
             f[c] = f[c].map(lambda x: f"{x * 100:.1f}%" if pd.notna(x) else "")
         elif c in ("sharpe", "trade_avg_r", "avg_r", "trade_profit_factor", "train_score"):
             f[c] = f[c].map(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+        elif c in ("raw_net", "excess"):
+            f[c] = f[c].map(lambda x: f"{x:+.2f}" if pd.notna(x) else "")
+        elif c in ("t_excess", "win_net"):
+            f[c] = f[c].map(lambda x: f"{x:.1f}" if pd.notna(x) else "")
         elif c in ("growth_of_1k",):
             f[c] = f[c].map(lambda x: f"{x:,.0f}")
         elif c in ("avg_trade_bps", "trade_avg_days", "trade_win_rate"):
@@ -360,6 +388,16 @@ CLONE_COLS = (
     "trade_avg_days",
 )
 WF_COLS = ("name", "start", "cagr", "sharpe", "max_drawdown")
+EVENT_COLS = (
+    "name",
+    "horizon",
+    "signals",
+    "days",
+    "raw_net",
+    "excess",
+    "t_excess",
+    "win_net",
+)
 INTRADAY_COLS = (
     "symbol",
     "name",
@@ -378,6 +416,7 @@ def render(
     *,
     bars_by_symbol: dict[str, pd.DataFrame] | None = None,
     include_clone: bool = True,
+    include_events: bool = True,
     windows: Sequence[str] = WINDOWS,
     data_label: str = "data/daily.pkl",
 ) -> str:
@@ -419,6 +458,8 @@ def render(
                         WINDOW_COLS,
                     )
                 )
+    if include_events:
+        parts.extend(event_sections(data))
     if data.has("SPY"):
         wf, choices = walkforward_table(data)
         parts.append("\n## Walk-forward check of the trend filter\n")
@@ -442,6 +483,37 @@ def render(
         parts.append("\nRules:\n\n")
         parts.append(_fmt(intraday_table(bars_by_symbol), INTRADAY_COLS))
     return "".join(parts)
+
+
+def event_sections(data: PriceData) -> list[str]:
+    """The entry-rule event studies, or nothing when the bundle has no
+    index universe wide enough for a daily mean to mean something."""
+    universe = data.available(data.universes.get("sp500", []))
+    if not data.has("SPY") or len(universe) < EVENT_MIN_UNIVERSE:
+        return []
+    studies = events.entry_rule_studies(data, universe)
+    return [
+        "\n## Entry rules as event studies (S&P 500, today's list)\n",
+        "Each table asks whether a signal day is followed by a better return: the signal "
+        "is read on a completed bar, the entry is the next open, the exit is the close "
+        "`horizon` sessions later, 10 bp a side. `raw_net` is the mean return per trade "
+        "after costs and `excess` the mean over SPY held across the same window, both in "
+        "percent and both means of daily means; `t_excess` is Newey-West with `horizon` "
+        "lags; `win_net` is the share of signals above zero after costs. Survivorship "
+        "lifts every row, so a row is read against the baseline beside it, not against "
+        "zero.\n\n",
+        "The reclaim gate (a pullback must close above its 10-day mean and the prior close "
+        "before it is a candidate):\n\n",
+        _fmt(studies["reclaim"], EVENT_COLS),
+        "\nThe index on the day of the signal:\n\n",
+        _fmt(studies["index"], EVENT_COLS),
+        "\nBuying the dip instead of the reclaim:\n\n",
+        _fmt(studies["dip"], EVENT_COLS),
+        "\nThe gap-and-hold beside its mirrors. A drift that a failed up gap and a down gap "
+        "show as well belongs to the data set (stocks that gapped and are in the index "
+        "today), not to the setup:\n\n",
+        _fmt(studies["gap"], EVENT_COLS),
+    ]
 
 
 def _clone_series(data: PriceData, universe: Sequence[str]) -> list[tuple[str, pd.Series]]:
