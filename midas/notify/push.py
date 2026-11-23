@@ -38,6 +38,7 @@ PUSH_TYPES = frozenset(
         "pipeline.halted",
         "ops.alert",
         "autonomy.l2_started",
+        "swing.trial_ended",
     }
 )
 LABELS = {
@@ -57,6 +58,7 @@ LABELS = {
     "pipeline.halted": "HALT",
     "ops.alert": "ALERT",
     "autonomy.l2_started": "L2 CLOCK",
+    "swing.trial_ended": "SWING TRIAL",
 }
 MAX_LINES = 12
 

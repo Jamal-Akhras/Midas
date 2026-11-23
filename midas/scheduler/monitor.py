@@ -49,6 +49,7 @@ from midas.outcomes.scoring import score_closed_positions
 from midas.pipeline.runner import render_content, run_agent_stage
 from midas.providers.router import ModelRouter
 from midas.risk import engine as risk_engine
+from midas.risk import trial as swing_trial
 
 logger = logging.getLogger(__name__)
 
@@ -1111,6 +1112,8 @@ def maybe_auto_cycle(session_factory: Callable[[], Session], router: ModelRouter
     with session_factory() as db:
         if not market_regime(db)["risk_on"] and settings.regime_throttle <= 0:
             return None  # binary risk-off: no research spend on refused entries
+        if swing_trial.status(db).ended:
+            return None  # the trial's stop rule: no research for a book that is off
     from datetime import datetime as _dt
 
     from midas.models import SystemState
@@ -1659,6 +1662,8 @@ def _strategy_fingerprint() -> str:
             "core_trend_window",
             "core_veto_days",
             "core_cash_ticker",
+            "swing_trial_trades",
+            "swing_trial_start",
             "setup_gate_enabled",
             "setup_gate_max_pullback_pct",
             "setup_gate_max_5d_drop_pct",
@@ -1893,9 +1898,12 @@ def _run_monitor_pass(
             # exits the gap review parked for the open go first: before
             # entries, before the stop layer, halted or not (risk reduction)
             summary["open_exits"] = execute_open_exits(db)
-        regime_ok = regime["risk_on"] or settings.regime_throttle > 0
+        trial = swing_trial.enforce(db)  # writes swing.trial_ended once, when it ends
+        if trial.active:
+            summary["swing_trial"] = trial.line()
+        entries_ok = (regime["risk_on"] or settings.regime_throttle > 0) and not trial.ended
         summary["executed"] = (
-            execute_approved_theses(db) if session_open and regime_ok and not halted else 0
+            execute_approved_theses(db) if session_open and entries_ok and not halted else 0
         )
         if session_open and settings.core_enabled and not halted:
             try:
@@ -1970,11 +1978,11 @@ def _run_monitor_pass(
             summary["auto_cycle"] = maybe_auto_cycle(session_factory, router)
         except Exception:
             logger.exception("auto-cycle failed")
-        if summary["auto_cycle"] is not None and session_open and regime_ok:
+        if summary["auto_cycle"] is not None and session_open and entries_ok:
             # Act on the yes: a thesis the cycle just approved is executed
             # now, on the facts the committee judged - not on the next pass's
             # price up to an interval later. Same gates as the first call
-            # (session open, regime; this is the not-halted branch).
+            # (session open, regime, swing trial; this is the not-halted branch).
             with session_factory() as db:
                 try:
                     summary["executed"] += execute_approved_theses(db)

@@ -272,6 +272,11 @@ class Settings(BaseSettings):
     # 20-day high is nearer than MIN_REWARD_TO_RISK times the structural
     # stop distance (no room).
     setup_gate_require_room: bool = True
+    # The swing book as a trial (2026-11-23): after this many closed trades
+    # opened on or after SWING_TRIAL_START, an average result at or below
+    # zero switches new swing entries and their research off (0 = no trial).
+    swing_trial_trades: int = 0
+    swing_trial_start: str = ""  # ISO date; empty = every swing trade counts
     # A trim that would leave less than this in the position is refused:
     # at small slot sizes the choice is hold or exit (0 = off).
     trim_min_remainder_usd: float = 75.0
@@ -549,6 +554,18 @@ EDITABLE_SETTINGS: dict[str, dict] = {
         "attr": "core_veto_days",
         "type": "int",
         "group": "core",
+        "fingerprint": True,
+    },
+    "SWING_TRIAL_TRADES": {
+        "attr": "swing_trial_trades",
+        "type": "int",
+        "group": "risk",
+        "fingerprint": True,
+    },
+    "SWING_TRIAL_START": {
+        "attr": "swing_trial_start",
+        "type": "str",
+        "group": "risk",
         "fingerprint": True,
     },
     "CORE_CASH_TICKER": {

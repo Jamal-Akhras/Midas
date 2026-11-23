@@ -23,6 +23,7 @@ from midas.models import (
     aware,
     utcnow,
 )
+from midas.risk import trial as swing_trial
 
 HALT_KEY = "pipeline_halt"
 
@@ -429,6 +430,16 @@ def _portfolio_checks(
     db: Session, checks: dict, sector: str, account_equity: float = 0.0, new_notional: float = 0.0
 ) -> bool:
     ok = True
+    trial = swing_trial.status(db)
+    if trial.active and trial.closed:
+        ok &= _check(
+            checks,
+            "swing_trial",
+            not trial.ended,
+            trial.value(),
+            f"average above zero after {trial.needed} closed trades",
+            "the stop rule written before the trial began",
+        )
     positions = open_positions(db)
     ok &= _check(
         checks,
