@@ -116,6 +116,14 @@ def _pin_market_state(monkeypatch):
     monkeypatch.setattr(_config.settings, "universe", "demo")
     monkeypatch.setattr(_config.settings, "watchlist", "")
     monkeypatch.setattr(_config.settings, "deep_scan_enabled", False)
+    # 2026-11-24: the live account moved to an 85% core book with a T-bill
+    # sleeve, a binary regime block and a swing trial; six tests written
+    # against the defaults failed on the operator's machine the day after
+    monkeypatch.setattr(_config.settings, "core_allocation_pct", 60.0)
+    monkeypatch.setattr(_config.settings, "core_cash_ticker", "")
+    monkeypatch.setattr(_config.settings, "regime_throttle", 0.5)
+    monkeypatch.setattr(_config.settings, "swing_trial_trades", 0)
+    monkeypatch.setattr(_config.settings, "swing_trial_start", "")
     # the cycle and the event scan run only where a test turns them on;
     # otherwise the suite would depend on the weekday and the operator's .env
     monkeypatch.setattr(_config.settings, "auto_cycle_weekdays", "")
