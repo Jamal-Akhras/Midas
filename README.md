@@ -51,7 +51,9 @@ they are good at: reading documents into sourced, structured, scored data.
 - **Core book** (`CORE_ENABLED`): equal slices of `CORE_ALLOCATION_PCT` of
   equity across `CORE_UNIVERSE` (default SPY, QQQ, EFA, GLD, IEF), each
   held only while above its 200-day average, rebalanced monthly through
-  the autonomy ladder. Off by default.
+  the autonomy ladder. With `CORE_CASH_TICKER` set (a T-bill ETF), the
+  share no slice holds waits there instead of at zero, as it does in
+  the backtest. Off by default.
 - **Swing committee**: long calls/puts and debit spreads, minimum 14 DTE
   at entry, defined risk only; share positions held weeks to months.
 - **Event flags**: sourced, structured readings of news and filings;
@@ -200,9 +202,9 @@ trade verdict must declare `earnings_play` or rule no_trade, and an
 earnings play is sized at half risk. The setup label a committee judges
 is the code's own, from completed bars; a pullback that has not closed
 back above its 10-day mean and the prior close is dropped by the gate
-(`SETUP_GATE_REQUIRE_RECLAIM`), as is a pullback whose 20-day high is
-nearer than `MIN_REWARD_TO_RISK` times its structural stop distance
-(`SETUP_GATE_REQUIRE_ROOM`) and any candidate reporting inside the entry
+(`SETUP_GATE_REQUIRE_RECLAIM`), as is any setup whose overhead 20-day
+high is nearer than `MIN_REWARD_TO_RISK` times its structural stop
+distance (`SETUP_GATE_REQUIRE_ROOM`) and any candidate reporting inside the entry
 window; the daily cycle waits `AUTO_CYCLE_AFTER_OPEN_MINUTES` after the
 open. Entries are bought on strength (`ENTRY_REQUIRE_STRENGTH`): the
 executor fills a shares entry only inside its zone and at or above the
@@ -219,13 +221,24 @@ stop, never cut it. The portfolio manager cannot exit a position younger
 than `PM_EXIT_MIN_AGE_HOURS` unless a research artifact or event flag newer
 than its entry exists.
 
+The swing book can be run as a trial with its stop rule written first
+(`SWING_TRIAL_TRADES`, `SWING_TRIAL_START`): after that many closed
+trades opened on or after the start date, an average result at or below
+zero ends new swing entries and the research spent on them, with one
+`swing.trial_ended` line in the audit trail. Open positions keep their
+stops and reviews. With `REGIME_THROTTLE=0` the swing book also stands
+aside, research included, while SPY is below its 200-day average.
+[ADR 0008](docs/adr/0008-core-runs-the-account-swing-is-a-trial.md) has
+the evidence behind both and behind the live allocation.
+
 ## Research
 
 `midas/research` is the backtesting toolkit behind `docs/results.md`:
 aligned daily data with a local cache, a drift-between-rebalances
 simulator with per-side costs, the strategy functions (trend filters, dual
 momentum, risk parity, cross-sectional momentum), the swing committee's
-deterministic clone, opening-range-breakout and intraday-momentum rules on
+deterministic clone, event studies of the entry rules (each beside a
+baseline or a mirror), opening-range-breakout and intraday-momentum rules on
 5-minute bars, and walk-forward parameter selection. The live core book
 trades the same `tactical_sma` function the report measures, so
 simulation and production cannot quietly diverge. Tests run on synthetic
@@ -302,8 +315,10 @@ tests/             offline tests (demo mode, in-memory SQLite, synthetic series)
 
 ## Known limitations (honest list)
 
-- The core book has backtest evidence and no live track record yet; the
-  swing committee has one closed paper trade. `midas stats` says so.
+- The core book has backtest evidence and two weeks of live record; the
+  swing committee has five closed paper trades, all losses, and no
+  measured edge in its setup (`docs/results.md`). It runs as a trial
+  with a stop rule (ADR 0008). `midas stats` says so.
 - Demo option pricing is shape-realistic but value-synthetic; deep OTM
   spreads look unrealistically cheap in demo mode.
 - Equity paper orders mirror to the real Alpaca paper account when keys

@@ -7,6 +7,21 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- `CORE_CASH_TICKER`: the share of the core allocation that no slice holds
+  (off trend, vetoed) waits in a T-bill ETF in the same book, bought when a
+  slice leaves its trend and sold first when one returns. The backtest
+  always paid the T-bill rate there; the live book paid zero, and 36% of
+  the account sat idle for the first fortnight of the November run.
+- The swing book as a trial (`SWING_TRIAL_TRADES`, `SWING_TRIAL_START`):
+  after that many closed trades an average result at or below zero ends
+  new swing entries (a failing `swing_trial` risk check) and the daily
+  cycle, with one `swing.trial_ended` event. Read from the first N trades
+  only. Off by default.
+- `midas.research.events`: event studies of the entry rules (next-open
+  entry, costs, Newey-West t on daily means), each beside a baseline or a
+  mirror, and four account rows in the catalogue (the core book at 60%,
+  85% and 100% of equity, idle cash at zero or in T-bills). Both are in
+  the regenerated `docs/results.md`; ADR 0008 records what they decided.
 - Entry on strength (`ENTRY_REQUIRE_STRENGTH`, `ENTRY_MAX_INDEX_DROP_PCT`): the
   executor fills a shares entry only inside its zone, at or above the prior
   close, and not while SPY is down more than the limit on the day; otherwise
@@ -157,6 +172,10 @@ not yet cut a release, so everything sits under Unreleased.
   `cost.divergence` audit event when they disagree; `docs/tollgate.md`.
 
 ### Changed
+- The room rule and the first-target cap apply to a gap-and-hold as well as
+  a pullback, wherever a 20-day high is overhead: six of the ten committees
+  that ended at the level checks (2026-11-13 to 11-19) were gap-and-holds
+  under their high. One at its high has no retest to measure and passes.
 - The stop-distance check measures from the lowest fill the entry zone
   allows, not from the zone high (INTU filled a fifth of an ATR from its
   stop). Half size halves the notional cap as well as the risk budget. A
