@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from midas.agents.schemas import VerdictOutput
 from midas.config import settings
+from midas.pipeline.setup_gate import CODE_SETUPS
 
 ENTRY_BAND_PCT = 15.0  # entry-zone midpoint must be within this of the live quote
 STOP_MIN_PCT = 2.0  # a stop closer than this is noise, not a thesis
@@ -121,22 +122,26 @@ def _window_problem(
 
 
 def _target_cap_problem(verdict: VerdictOutput, technical: dict, atr: float | None) -> str | None:
-    """A thin trade must not be rescued by a further target: the first
-    target of a pullback is the retest of its 20-day high. (The other
+    """A thin trade must not be rescued by a further target: under a
+    20-day high (a pullback, or a gap-and-hold that has not retaken its
+    high) the first target is the retest of that high. (The other
     escape, a lower entry zone, is `_window_problem`.)"""
     floor = float(settings.min_reward_to_risk)
-    if technical.get("setup") != "pullback-in-uptrend" or not verdict.targets:
+    if technical.get("setup") not in CODE_SETUPS or not verdict.targets:
         return None
     high = _num((technical.get("high_20d") or {}).get("price"))
+    close = _num(technical.get("close"))
     if high is None or atr is None or atr <= 0 or floor <= 0:
         return None
+    if close is not None and high <= close:
+        return None  # at its high: no overhead level to retest
     target = float(verdict.targets[0])
     beyond = (target - high) / atr
     if beyond <= TARGET_CAP_ATR:
         return None
     return (
-        f"first target {target:g} is {beyond:.1f} ATR beyond the 20-day high {high:g}: the "
-        f"first target of a pullback is the retest of that high (within {TARGET_CAP_ATR:g} "
+        f"first target {target:g} is {beyond:.1f} ATR beyond the 20-day high {high:g}: under "
+        f"a 20-day high the first target is the retest of that high (within {TARGET_CAP_ATR:g} "
         "ATR of it); a further level is a second target - if the retest does not pay "
         f"{floor:g} to 1, rule no_trade"
     )

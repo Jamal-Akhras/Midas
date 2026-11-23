@@ -77,12 +77,16 @@ def test_a_pullbacks_first_target_is_the_retest_of_its_high():
     v = _verdict(entry_zone_low=325.0, entry_zone_high=328.0, stop_price=317.0, targets=[360.0])
     (problem,) = verdict_checks.problems(v, 327.0, atr=8.0, technical=TECH)
     assert problem == (
-        "first target 360 is 1.9 ATR beyond the 20-day high 345: the first target of a "
-        "pullback is the retest of that high (within 1 ATR of it); a further level is a "
+        "first target 360 is 1.9 ATR beyond the 20-day high 345: under a 20-day high the "
+        "first target is the retest of that high (within 1 ATR of it); a further level is a "
         "second target - if the retest does not pay 1.5 to 1, rule no_trade"
     )
+    # a gap-and-hold under its 20-day high is held to the same retest (2026-11-23) ...
     gap = {**TECH, "setup": "gap-and-hold"}
-    assert verdict_checks.problems(v, 327.0, atr=8.0, technical=gap) == []
+    assert verdict_checks.problems(v, 327.0, atr=8.0, technical=gap) == [problem]
+    # ... and one at its high has no overhead level to cap the target
+    at_high = {**gap, "high_20d": {"price": 326.0, "date": "2026-11-19"}}
+    assert verdict_checks.problems(v, 327.0, atr=8.0, technical=at_high) == []
 
 
 def test_a_thin_trade_is_no_longer_told_to_raise_its_target():

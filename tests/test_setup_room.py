@@ -111,7 +111,7 @@ def test_a_pullback_with_room_passes():
     assert setup_gate(tech) == []
 
 
-def test_the_room_rule_is_the_pullbacks_and_can_be_switched_off(monkeypatch):
+def test_the_room_rule_can_be_switched_off(monkeypatch):
     thin = _tech(high_20d={"price": 103.0, "date": "2026-11-03"})
     thin["levels"] = structure_levels(thin)
     monkeypatch.setattr(settings, "setup_gate_require_room", False)
@@ -119,14 +119,33 @@ def test_the_room_rule_is_the_pullbacks_and_can_be_switched_off(monkeypatch):
     monkeypatch.setattr(settings, "setup_gate_require_room", True)
     monkeypatch.setattr(settings, "min_reward_to_risk", 0.0)  # no floor: nothing to compare
     assert setup_gate(thin) == []
-    monkeypatch.setattr(settings, "min_reward_to_risk", 1.5)
+
+
+def _gap(high: float) -> dict:
     gap = _tech(
         setup="gap-and-hold",
         last_gap={"low": 97.0, "direction": "up", "holds": True, "sessions_ago": 3},
-        high_20d={"price": 101.0, "date": "2026-11-18"},
+        high_20d={"price": high, "date": "2026-11-18"},
     )
     gap["levels"] = structure_levels(gap)
-    assert setup_gate(gap) == []  # momentum at its highs has no overhead reference
+    return gap
+
+
+def test_a_gap_and_hold_under_its_high_needs_room_too():
+    # 2026-11-23: six of the ten committees that ended at the level checks were
+    # gap-and-holds under their 20-day high (AMD 0.07R, AMZN 0.75R, LLY 1.15R)
+    gap = _gap(101.0)
+    assert setup_gate(gap) == [
+        "no room: the 20-day high 101 is 0.33 times the risk from the close 100 with the "
+        "stop at 97 (gap bar low; minimum 1.5) - the retest does not pay for the stop"
+    ]
+    assert "room 0.3R to the 20d high" in facts_line("GAP", gap)
+
+
+def test_a_gap_and_hold_at_its_high_has_no_room_to_check():
+    gap = _gap(100.0)  # nothing overhead: no retest to measure
+    assert gap["levels"]["reward_to_risk"] is None
+    assert setup_gate(gap) == []
 
 
 # ---------- the gate: the earnings window ----------

@@ -179,7 +179,7 @@ def facts_line(ticker: str, technical: dict | None, score: float | None = None) 
     elif technical.get("reclaim") is False:
         parts.append(f"no reclaim yet ({_reclaim_miss(technical, long=False)})")
     room = (technical.get("levels") or {}).get("reward_to_risk")
-    if room is not None and label == "pullback-in-uptrend":
+    if room is not None and label in CODE_SETUPS:
         parts.append(f"room {float(room):.1f}R to the 20d high")
     atr_pct = technical.get("atr14_pct")
     if atr_pct is not None:
@@ -240,8 +240,11 @@ def setup_gate(technical: dict | None, setup: str = "") -> list[str]:
     levels = technical.get("levels") or {}
     room = levels.get("reward_to_risk")
     floor = float(settings.min_reward_to_risk)
+    # either code setup, wherever a 20-day high is overhead: six of the ten
+    # committees that ended at the level checks (2026-11-13 to 11-19) were
+    # gap-and-holds under their high. One at its high has no room to check.
     if (
-        code_label == "pullback-in-uptrend"
+        code_label in CODE_SETUPS
         and settings.setup_gate_require_room
         and floor > 0
         and room is not None

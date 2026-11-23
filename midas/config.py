@@ -264,8 +264,9 @@ class Settings(BaseSettings):
     entry_require_strength: bool = True
     entry_max_index_drop_pct: float = 0.5
     # The setup gate also drops a candidate with earnings inside the entry
-    # window, and a pullback whose 20-day high is nearer than
-    # MIN_REWARD_TO_RISK times the structural stop distance (no room).
+    # window, and a setup (pullback, or gap-and-hold under its high) whose
+    # 20-day high is nearer than MIN_REWARD_TO_RISK times the structural
+    # stop distance (no room).
     setup_gate_require_room: bool = True
     # A trim that would leave less than this in the position is refused:
     # at small slot sizes the choice is hold or exit (0 = off).

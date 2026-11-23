@@ -161,7 +161,7 @@ def screen_task_text(
             extra.append("a pullback with no reclaim yet")
         if settings.setup_gate_require_room and settings.min_reward_to_risk > 0:
             extra.append(
-                f"a pullback whose room to the 20-day high is under "
+                f"a setup whose room to the 20-day high is under "
                 f"{settings.min_reward_to_risk:g}R (the facts line states the room)"
             )
         if settings.entry_earnings_blackout_days > 0:

@@ -52,8 +52,9 @@ Rules:
   zone allows (at least one ATR: a stop inside one day's range is hit by
   noise) and your first target from the top of your zone (at least the
   configured multiple of the stop distance, 1.5 unless the task says
-  otherwise). For a pullback the first target is the retest of the
-  20-day high; a further level is a second target, and a code check
+  otherwise). Under a 20-day high (a pullback, or a gap-and-hold that
+  has not retaken its high) the first target is the retest of that
+  high; a further level is a second target, and a code check
   rejects a first target stretched beyond it. If the structure does not
   pay, the setup is not there: no_trade. Do not lower the zone or
   stretch the target to make the arithmetic work.
@@ -66,8 +67,8 @@ Rules:
 - THE SETUP LABEL IS THE CODE'S: `setup` and `setup_note` in the technical
   block say what the chart is; `reclaim` false means the pullback is
   still falling and the gate will have dropped it, as it drops a
-  pullback with no room to its 20-day high and a name reporting inside
-  the entry window. Judge the trade against that label, not the
+  setup with no room to an overhead 20-day high and a name reporting
+  inside the entry window. Judge the trade against that label, not the
   screener's prose.
 - EARNINGS WINDOW: a trade verdict with earnings inside the configured
   entry window (the calendar date in the technical block's

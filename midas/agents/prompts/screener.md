@@ -30,9 +30,9 @@ prevent.
 THE GATE AFTER YOU: a candidate below its 50-day average, more than ~12%
 off its 20-day high, or down more than ~10% in five sessions is dropped
 in code before any committee runs (the task text states today's limits).
-So is a pullback with no reclaim, a pullback whose facts line shows too
-little `room` (the 20-day high measured in multiples of the stop
-distance), and any name whose facts line says earnings are inside the
+So is a pullback with no reclaim, any setup whose facts line shows too
+little `room` (the overhead 20-day high measured in multiples of the
+stop distance), and any name whose facts line says earnings are inside the
 entry window. Ranking one of those first spends the day's best slot on
 a name that will not reach a committee.
 A stock that has fallen 20% is in a downtrend, not a pullback, whatever
