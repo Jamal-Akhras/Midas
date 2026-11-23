@@ -4,7 +4,10 @@ Rules (the same ones midas.research.strategies.tactical_sma backtests):
 each ticker in CORE_UNIVERSE gets an equal slice of CORE_ALLOCATION_PCT of
 equity while its close is above its CORE_TREND_WINDOW-day average, and sits
 in cash otherwise. A high-severity negative event flag on a ticker (see
-midas.pipeline.events) zeroes its slice for that rebalance.
+midas.pipeline.events) zeroes its slice for that rebalance. With
+CORE_CASH_TICKER set, that cash is a T-bill ETF held in the same book:
+the backtest pays the T-bill rate on every off-trend slice, and a live
+book that holds nothing there runs behind its own rule.
 
 Positions live in the "core" book: the swing committee's stops, time stops,
 reviews and risk caps leave them alone, and its statistics exclude them.
@@ -97,12 +100,14 @@ class CorePlan:
     def to_content(self) -> dict[str, Any]:
         content = asdict(self)
         content["orders"] = [asdict(o) for o in self.orders]
+        sleeve = cash_sleeve_ticker()
+        slices = [t for t in self.targets if t != sleeve]
         content["rules"] = (
             f"equal slices of {settings.core_allocation_pct:g}% of equity across "
-            f"{len(self.targets)} tickers, each held only above its "
+            f"{len(slices)} tickers, each held only above its "
             f"{settings.core_trend_window}-day average; high-severity negative event "
             f"flags within {settings.core_veto_days} days veto a slice"
-        )
+        ) + (f"; the off-trend share is held in {sleeve}" if sleeve in self.targets else "")
         return content
 
     @classmethod
@@ -125,6 +130,24 @@ class CorePlan:
 
 def core_universe() -> list[str]:
     return [t.strip().upper() for t in settings.core_universe.split(",") if t.strip()]
+
+
+def cash_sleeve_ticker() -> str:
+    return settings.core_cash_ticker.strip().upper()
+
+
+def with_cash_sleeve(targets: Mapping[str, float], cash_ticker: str) -> dict[str, float]:
+    """The targets plus the cash sleeve: whatever share of the allocation
+    no slice holds (off trend, vetoed, short of history) goes to
+    `cash_ticker`. Fully on trend the sleeve is a target of zero, so a
+    held sleeve is sold to fund the slices. No ticker, or one that is
+    already a slice, leaves the targets as they are."""
+    out = {str(t): float(w) for t, w in targets.items()}
+    ticker = cash_ticker.strip().upper()
+    if not ticker or ticker in out:
+        return out
+    out[ticker] = round(max(0.0, 1.0 - sum(out.values())), 6)
+    return out
 
 
 def today_et() -> str:
@@ -336,6 +359,16 @@ def build_plan(db: Session, *, vetoes: Mapping[str, str] | None = None) -> CoreP
         if ticker in targets:
             targets[ticker] = 0.0
             trend.setdefault(ticker, {})["veto"] = reason
+    sleeve = cash_sleeve_ticker()
+    targets = with_cash_sleeve(targets, sleeve)
+    if sleeve and sleeve not in closes and sleeve in targets:
+        trend[sleeve] = {"sleeve": "cash", "share": round(targets[sleeve], 4)}
+        try:  # the sleeve has no trend to read: it only needs a price to size
+            bars = execute("get_daily_bars", {"ticker": sleeve, "days": 5})
+            prices[sleeve] = _live_price(execute, sleeve, float(bars["data"][-1]["close"]))
+        except Exception as exc:  # noqa: BLE001 - the slices must still trade
+            logger.warning("no price for the cash sleeve %s: %s", sleeve, type(exc).__name__)
+            trend[sleeve]["note"] = "no price: the share stays in cash this rebalance"
     holdings: dict[str, float] = {}
     for p in core_positions(db):  # several rows for one ticker still add up
         holdings[p.ticker] = holdings.get(p.ticker, 0.0) + p.qty

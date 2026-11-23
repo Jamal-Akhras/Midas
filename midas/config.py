@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     core_allocation_pct: float = 60.0  # share of equity the core book may hold
     core_trend_window: int = 200  # days; a slice is held only above this average
     core_veto_days: int = 30  # a high-severity negative flag vetoes a slice this long
+    # Where the off-trend share of the allocation waits (a T-bill ETF such
+    # as SGOV). The backtest pays the T-bill rate on every slice that is
+    # off trend; with this empty the live book holds idle cash at zero.
+    core_cash_ticker: str = ""
     # Event analyst cadence (EVENT_SCAN_WEEKDAYS=mon): scans core universe +
     # watchlist once per listed day. Empty = manual (`midas flags scan`).
     event_scan_weekdays: str = ""
@@ -544,6 +548,12 @@ EDITABLE_SETTINGS: dict[str, dict] = {
     "CORE_VETO_DAYS": {
         "attr": "core_veto_days",
         "type": "int",
+        "group": "core",
+        "fingerprint": True,
+    },
+    "CORE_CASH_TICKER": {
+        "attr": "core_cash_ticker",
+        "type": "str",
         "group": "core",
         "fingerprint": True,
     },

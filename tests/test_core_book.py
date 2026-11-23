@@ -25,7 +25,7 @@ from midas.outcomes.scoring import score_closed_positions, stats
 from midas.risk import engine as risk_engine
 from midas.scheduler import monitor
 from midas.strategy import core
-from midas.strategy.core import plan_orders, trend_targets
+from midas.strategy.core import plan_orders, trend_targets, with_cash_sleeve
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +36,7 @@ def core_settings(monkeypatch):
     monkeypatch.setattr(settings, "core_universe", "ACME,BOLT,DUNE")
     monkeypatch.setattr(settings, "core_allocation_pct", 60.0)
     monkeypatch.setattr(settings, "core_trend_window", 20)
+    monkeypatch.setattr(settings, "core_cash_ticker", "")
     monkeypatch.setattr(settings, "fractional_shares", True)
 
 
@@ -261,3 +262,91 @@ def test_denied_plan_is_this_months_answer(db):
     assert req.status == ApprovalStatus.denied
     assert db.scalars(select(Position)).all() == []
     assert core.run_rebalance(db)["status"] == "not_due"
+
+
+# ---------- the cash sleeve ----------
+# 2026-11-23: the backtest behind the core book holds T-bills for every slice
+# that is off trend; the live book held nothing. With three of five slices off
+# trend, 36% of the account sat at zero for the first fortnight of the run.
+
+
+def test_the_off_trend_share_goes_to_the_cash_sleeve():
+    targets = {"A": 0.2, "B": 0.0, "C": 0.2, "D": 0.0, "E": 0.0}
+    assert with_cash_sleeve(targets, "tbil") == {**targets, "TBIL": pytest.approx(0.6)}
+    # fully on trend: the sleeve is a target of zero, so a held sleeve is sold
+    assert with_cash_sleeve({"A": 0.5, "B": 0.5}, "TBIL")["TBIL"] == 0.0
+    assert with_cash_sleeve(targets, "") == targets  # no sleeve: the share stays cash
+    assert with_cash_sleeve(targets, "A") == targets  # a slice cannot double as the sleeve
+
+
+def test_a_trend_break_moves_the_slice_into_the_sleeve_and_back(db, monkeypatch):
+    monkeypatch.setattr(settings, "autonomy_level", 1)
+    monkeypatch.setattr(settings, "core_cash_ticker", "CRUX")  # a demo ticker outside the universe
+    core.run_rebalance(db, force=True)
+    db.commit()
+    # every slice on trend: nothing to park
+    assert {p.ticker for p in core.core_positions(db)} == {"ACME", "BOLT", "DUNE"}
+
+    from midas.tools import market_data
+    from midas.tools.registry import TOOLS
+
+    real_bars = market_data.get_daily_bars
+
+    def falling_bolt(ticker: str, days: int = 60):
+        result = real_bars(ticker, days)
+        if ticker == "BOLT":
+            for i, bar in enumerate(result.data):
+                bar["close"] = 100.0 - i
+        return result
+
+    monkeypatch.setattr(market_data, "get_daily_bars", falling_bolt)
+    monkeypatch.setattr(TOOLS["get_daily_bars"], "fn", falling_bolt)
+    result = core.run_rebalance(db, force=True)
+    db.commit()
+    assert result["status"] == "executed"
+    assert result["orders"][0].startswith("sell")  # the exit funds the sleeve
+    held = {p.ticker: p for p in core.core_positions(db)}
+    assert set(held) == {"ACME", "DUNE", "CRUX"}
+    sleeve = held["CRUX"]
+    assert sleeve.book == CORE_BOOK and sleeve.stop_price == 0.0
+    # a third of the 60% allocation of a 100k account
+    assert sleeve.qty * sleeve.avg_price == pytest.approx(20_000, rel=0.03)
+    plan = db.get(ResearchArtifact, __import__("uuid").UUID(result["artifact_id"])).content
+    assert plan["targets"]["CRUX"] == pytest.approx(1 / 3)
+    assert plan["trend"]["CRUX"] == {"sleeve": "cash", "share": pytest.approx(1 / 3, abs=1e-4)}
+    assert "3 tickers" in plan["rules"] and "off-trend share is held in CRUX" in plan["rules"]
+    assert risk_engine.open_notional_usd(db) == 0.0  # the sleeve is core, not swing exposure
+
+    # back on trend: the sleeve is sold and the slice is bought again
+    monkeypatch.setattr(market_data, "get_daily_bars", real_bars)
+    monkeypatch.setattr(TOOLS["get_daily_bars"], "fn", real_bars)
+    result = core.run_rebalance(db, force=True)
+    db.commit()
+    assert result["status"] == "executed"
+    assert {p.ticker for p in core.core_positions(db)} == {"ACME", "BOLT", "DUNE"}
+
+
+def test_a_sleeve_with_no_price_leaves_the_share_in_cash(db, monkeypatch):
+    monkeypatch.setattr(settings, "autonomy_level", 1)
+    monkeypatch.setattr(settings, "core_cash_ticker", "TBIL")
+    monkeypatch.setattr(settings, "core_universe", "ACME,BOLT")
+    from midas.tools import market_data
+    from midas.tools.base import ToolError
+    from midas.tools.registry import TOOLS
+
+    real_bars = market_data.get_daily_bars
+
+    def no_sleeve_bars(ticker: str, days: int = 60):
+        if ticker == "TBIL":
+            raise ToolError("no bar data source available for TBIL")
+        result = real_bars(ticker, days)
+        if ticker == "BOLT":
+            for i, bar in enumerate(result.data):
+                bar["close"] = 100.0 - i
+        return result
+
+    monkeypatch.setattr(market_data, "get_daily_bars", no_sleeve_bars)
+    monkeypatch.setattr(TOOLS["get_daily_bars"], "fn", no_sleeve_bars)
+    plan = core.build_plan(db)
+    assert [o.ticker for o in plan.orders] == ["ACME"]  # the slice still trades
+    assert "no price" in plan.trend["TBIL"]["note"]

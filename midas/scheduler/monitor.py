@@ -1658,6 +1658,7 @@ def _strategy_fingerprint() -> str:
             "core_allocation_pct",
             "core_trend_window",
             "core_veto_days",
+            "core_cash_ticker",
             "setup_gate_enabled",
             "setup_gate_max_pullback_pct",
             "setup_gate_max_5d_drop_pct",
