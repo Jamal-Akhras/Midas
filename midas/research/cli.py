@@ -4,6 +4,8 @@ midas research fetch [--out data/daily.pkl] [--start 2004-01-01]
 midas research fetch-intraday --symbols SPY,QQQ [--out data/intraday]
 midas research report [--data data/daily.pkl] [--out docs/results.md]
                       [--intraday data/intraday] [--no-clone]
+midas research backtest [--years 10] [--data data/daily.pkl] [--capital 1000]
+                        [--out FILE]   # the live configuration, replayed
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import io
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 ETFS = [
     "SPY", "QQQ", "IWM", "EFA", "EEM", "AGG", "IEF", "TLT", "SHY", "BIL", "GLD", "DBC", "VNQ", "TIP",
@@ -87,6 +90,68 @@ def cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def live_account_config() -> Any:
+    """The account as the live settings describe it, for `backtest`."""
+    from midas.config import settings
+    from midas.research.account import AccountConfig, SwingRules
+    from midas.risk.engine import swing_budget_pct
+
+    core_on = bool(settings.core_enabled)
+    gate = bool(settings.setup_gate_enabled)
+    rules = SwingRules(
+        risk_pct=float(settings.per_trade_risk_pct),
+        notional_cap_pct=float(settings.max_notional_pct_per_trade),
+        max_holding_days=int(settings.max_holding_days),
+        breakeven_r=float(settings.breakeven_at_r),
+        trail_days=int(settings.trail_lookback_days),
+        require_reclaim=gate and bool(settings.setup_gate_require_reclaim),
+        stop_atr=float(settings.min_stop_atr),
+        min_room=(
+            float(settings.min_reward_to_risk) if gate and settings.setup_gate_require_room else 0.0
+        ),
+        entry_wait_days=5 if settings.entry_require_strength else 0,
+        max_index_gap_pct=float(settings.entry_max_index_drop_pct),
+        regime=bool(settings.regime_filter_enabled),
+        throttle=float(settings.regime_throttle),
+        trial_trades=int(settings.swing_trial_trades),
+        committee_cap=int(settings.auto_cycle_max_committees),
+    )
+    return AccountConfig(
+        core_universe=tuple(
+            t.strip().upper() for t in settings.core_universe.split(",") if t.strip()
+        ),
+        core_allocation_pct=float(settings.core_allocation_pct) if core_on else 0.0,
+        core_trend_window=int(settings.core_trend_window),
+        cash_sleeve=bool(settings.core_cash_ticker.strip()),
+        swing_budget_pct=float(swing_budget_pct()),
+        swing=rules,
+    )
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    import warnings
+
+    import pandas as pd
+
+    from midas.research.account import render, replay
+    from midas.research.data import PriceData
+
+    warnings.simplefilter("ignore", FutureWarning)
+    data = PriceData.from_pickle(Path(args.data))
+    start = data.index[-1] - pd.DateOffset(days=round(float(args.years) * 365.25))
+    result = replay(data, live_account_config(), start=str(start.date()))
+    text = render(
+        result, capital=float(args.capital), committee_cost_usd=float(args.committee_cost)
+    )
+    print(text)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="midas research",
@@ -111,6 +176,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     r.add_argument("--intraday", default="data/intraday")
     r.add_argument("--no-clone", action="store_true", help="skip the slow swing-clone section")
     r.set_defaults(fn=cmd_report)
+    b = sub.add_parser("backtest", help="replay the live configuration over the last N years")
+    b.add_argument("--years", type=float, default=10.0)
+    b.add_argument("--data", default="data/daily.pkl")
+    b.add_argument("--capital", type=float, default=1000.0, help="account size for the spend line")
+    b.add_argument("--committee-cost", type=float, default=0.14, help="USD per committee")
+    b.add_argument("--out", default="", help="also write the replay to this file")
+    b.set_defaults(fn=cmd_backtest)
     args = parser.parse_args(argv)
     result: int = args.fn(args)
     return result

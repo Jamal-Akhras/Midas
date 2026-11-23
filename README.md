@@ -241,13 +241,17 @@ deterministic clone, event studies of the entry rules (each beside a
 baseline or a mirror), opening-range-breakout and intraday-momentum rules on
 5-minute bars, and walk-forward parameter selection. The live core book
 trades the same `tactical_sma` function the report measures, so
-simulation and production cannot quietly diverge. Tests run on synthetic
+simulation and production cannot quietly diverge. `midas research
+backtest` reads the live settings and replays the account they describe
+(both books, the T-bill sleeve, the swing rules as code, the trial) over
+the last N years; it replays rules, not the committee, and says so. Tests run on synthetic
 series with known answers. Typed to the strict mypy profile.
 
 ```bash
 midas research fetch                 # daily bars (yfinance) -> data/daily.pkl
 midas research fetch-intraday --symbols SPY,QQQ   # Alpaca 5-minute bars -> data/intraday/
 midas research report                # -> docs/results.md
+midas research backtest --years 10   # the live configuration, replayed
 ```
 
 ## The Analyst Workstation

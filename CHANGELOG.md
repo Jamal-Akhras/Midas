@@ -7,6 +7,13 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- `midas research backtest --years N`: the account as the live settings
+  describe it, replayed over the last N years - the core book with its
+  T-bill sleeve and the swing rules as code (reclaim, structural stop,
+  room, entry on strength, the binary regime block, the trial), with the
+  swing trades, the committees a daily cycle would have run and a table
+  by year. `midas_clone` takes the newer rules as opt-in keywords; its
+  defaults and every figure in `docs/results.md` are unchanged.
 - `CORE_CASH_TICKER`: the share of the core allocation that no slice holds
   (off trend, vetoed) waits in a T-bill ETF in the same book, bought when a
   slice leaves its trend and sold first when one returns. The backtest
@@ -211,6 +218,9 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- The test baseline pins the core allocation, the cash sleeve, the regime
+  throttle and the swing trial: six tests read the operator's `.env` and
+  failed once the live account moved off the defaults.
 - An ordinary stop could never confirm: the monitor pass counted a breach
   in a session it closed without committing, so every pass counted "one of
   two" and wrote no pending line. SNPS sat under its stop on three sessions
