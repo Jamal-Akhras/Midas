@@ -19,10 +19,10 @@ zero. Measured on the same data (docs/results.md, from 2005):
 
 | Account | Return a year | Since 2022 | Worst drawdown |
 |---|---|---|---|
-| Core 60%, idle cash at zero (live) | 4.6% | 4.4% | -6.7% |
-| Core 60%, the rest in T-bills | 5.5% | 6.5% | -6.7% |
-| Core 85%, the rest in T-bills | 7.1% | 7.6% | -9.4% |
-| Core 100% | 8.1% | 8.2% | -11.0% |
+| Core 60%, idle cash at zero (live) | 4.6% | 4.5% | -6.7% |
+| Core 60%, the rest in T-bills | 5.6% | 6.7% | -6.7% |
+| Core 85%, the rest in T-bills | 7.1% | 7.7% | -9.4% |
+| Core 100% | 8.1% | 8.4% | -11.0% |
 | T-bills | 1.7% | 3.9% | 0% |
 
 **No entry rule the record suggested has an edge.** Nine sessions of
@@ -33,11 +33,11 @@ gap-and-hold. Each was put to every signal day in the 22-year set
 (`midas.research.events`). The reclaim gate is neutral to slightly
 positive. The index condition adds nothing in raw return beyond the
 200-day rule already in force. Buying the dip paid until about 2012 and
-has paid nothing since 2020. The gap-and-hold drifts +0.84% over SPY in
-20 sessions, and so do a failed up gap (+1.10%) and a down gap (+0.79%):
+has paid nothing since 2020. The gap-and-hold drifts +0.78% over SPY in
+20 sessions, and so do a failed up gap (+1.02%) and a down gap (+0.78%):
 the drift is survivorship in a list of today's index members, not a
-setup. The pullback setup itself returns 0.49% per 10 sessions after
-costs against 0.34% for any stock in an uptrend.
+setup. The pullback setup itself returns 0.48% per 10 sessions after
+costs against 0.33% for any stock in an uptrend.
 
 **The committee's spend went on trades that could not pass.** Of $3.36
 spent on models in eleven sessions, 86% was committees and 44% was ten
@@ -63,7 +63,7 @@ checked for room.
 3. **No swing entries while SPY is below its 200-day average**
    (`REGIME_THROTTLE=0`, the binary mode that already existed). Over 22
    years the reclaimed setup returned 0.31% per 10 sessions below the
-   200-day (t-statistic of the excess -0.3) against 0.54% above it (4.0).
+   200-day (t-statistic of the excess -0.3) against 0.52% above it (3.9).
 4. **The room rule covers both code setups** wherever a 20-day high is
    overhead, so a gap-and-hold that cannot pay 1.5 to 1 to the retest
    is dropped before a committee is spent on it.

@@ -288,3 +288,33 @@ def test_report_renders_markdown_from_a_bundle():
     assert "Buy & hold SPY" in text and "60/40 SPY/AGG" in text
     assert "## Walk-forward check" in text
     assert "Midas swing skeleton" not in text  # no S&P universe in the bundle
+
+
+# ---------- the calendar ----------
+
+
+def _frames(close: pd.DataFrame) -> dict:
+    return {k: close.copy() for k in ("open", "high", "low", "close", "volume")}
+
+
+def test_a_row_only_an_index_printed_on_is_not_a_session():
+    # 2026-11-24: ^VIX carried a value on Memorial Day and Labor Day 2026. The
+    # two rows blanked every 200-day average for 200 sessions each, so no trend
+    # rule in the report traded between May and November 2026.
+    idx = pd.bdate_range("2024-01-01", periods=30)
+    cols = [f"S{i}" for i in range(11)] + ["^VIX"]
+    close = pd.DataFrame(100.0, index=idx, columns=cols)
+    close.iloc[10, :11] = np.nan  # a market holiday: only the index has a value
+    d = PriceData.from_frames(_frames(close))
+    assert idx[10] not in d.index and len(d.index) == 29
+    assert d.close["S0"].rolling(20).mean().iloc[-1] == 100.0  # averages run through it
+    assert d.index.equals(d.cash_daily.index) and d.index.equals(d.volume.index)
+
+
+def test_a_day_one_stock_is_missing_is_still_a_session():
+    idx = pd.bdate_range("2024-01-01", periods=30)
+    close = pd.DataFrame(100.0, index=idx, columns=[f"S{i}" for i in range(12)])
+    close.iloc[10, 0] = np.nan  # one halted name
+    close.iloc[:5, 6:] = np.nan  # half the universe not listed yet
+    d = PriceData.from_frames(_frames(close))
+    assert len(d.index) == 30

@@ -218,6 +218,11 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- The research data loader drops rows that are not sessions. `^VIX` carried a
+  value on Memorial Day and Labor Day 2026; those two rows left every 200-day
+  average blank for 200 sessions, so no trend rule in `docs/results.md` traded
+  between May and November 2026. Regenerated: figures move by 0.2 points at
+  most, and ADR 0008 quotes the corrected ones.
 - The test baseline pins the core allocation, the cash sleeve, the regime
   throttle and the swing trial: six tests read the operator's `.env` and
   failed once the live account moved off the defaults.

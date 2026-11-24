@@ -19,6 +19,9 @@ CASH_SYMBOL = "^IRX"  # 13-week T-bill discount yield, in percent
 TRADING_DAYS = 252
 
 
+MIN_SESSION_COVERAGE = 0.1  # share of symbols with a close for a row to be a session
+
+
 @dataclass(frozen=True)
 class PriceData:
     open: pd.DataFrame
@@ -87,7 +90,12 @@ class PriceData:
     @classmethod
     def from_frames(cls, raw: Mapping[str, Any]) -> PriceData:
         frames = {k: raw[k].sort_index() for k in FRAME_KEYS}
-        idx = frames["close"].index
+        # A row with a close for almost nothing is not a session: an index
+        # such as ^VIX can carry a value on a market holiday, and one such
+        # row blanks every rolling average that spans it (two in 2026 left
+        # no 200-day average, and so no trend signal, from May to November).
+        priced = frames["close"].notna().mean(axis=1)
+        idx = frames["close"].index[priced >= MIN_SESSION_COVERAGE]
         frames = {k: v.reindex(idx) for k, v in frames.items()}
         for k, v in frames.items():
             frames[k] = v.loc[:, ~v.columns.duplicated()]
