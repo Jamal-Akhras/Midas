@@ -333,3 +333,73 @@ def test_the_openai_request_carries_the_temperature_when_given(monkeypatch):
     assert seen["payload"]["temperature"] == 0
     openai_provider.OpenAIProvider().complete(**call)
     assert "temperature" not in seen["payload"]
+
+
+# ---------- a busy feed: every item once, none dropped ----------
+
+
+def _busy_feed(monkeypatch, n: int) -> None:
+    items = [
+        {
+            "headline": f"Headline {i:02d}",
+            "date": f"2026-11-{26 - i // 10:02d}T{23 - i % 10:02d}:00:00Z",
+            "source": "wire",
+            "url": f"https://news.example.com/item-{i:02d}",
+        }
+        for i in range(n)  # item-00 is the newest
+    ]
+    monkeypatch.setitem(demo_data.NEWS, "default", items)
+    monkeypatch.setitem(demo_data.EDGAR_FILINGS, "default", [])
+
+
+def _listed(prompt: str) -> list[str]:
+    return [line.rsplit("/", 1)[-1] for line in prompt.splitlines() if line.startswith("- ")]
+
+
+def test_a_backlog_is_read_newest_first_and_the_rest_waits_for_the_next_scan(
+    demo, factory, demo_router, monkeypatch
+):
+    _busy_feed(monkeypatch, 30)
+    events.run_event_scan(factory, demo_router, ["DUNE"])
+    with factory() as db:
+        first = _listed(_last_prompt(db))
+    assert first == [f"item-{i:02d}" for i in range(24)]  # the cap, newest first
+    events.run_event_scan(factory, demo_router, ["DUNE"])  # nothing new has arrived
+    with factory() as db:
+        second = _listed(_last_prompt(db))
+    assert second == [f"item-{i:02d}" for i in range(24, 30)]  # the six it had not been shown
+    third = events.run_event_scan(factory, demo_router, ["DUNE"])
+    assert third[0].get("skipped") == "no new items"  # all thirty read, each once
+
+
+def test_the_scan_asks_the_feed_for_more_than_one_screenful(
+    demo, factory, demo_router, monkeypatch
+):
+    asked: list[dict] = []
+    from midas.tools.registry import TOOLS
+
+    real = TOOLS["get_news"].fn
+
+    def spy(ticker: str, limit: int = 10):
+        asked.append({"ticker": ticker, "limit": limit})
+        return real(ticker, limit)
+
+    monkeypatch.setattr(TOOLS["get_news"], "fn", spy)
+    events.run_event_scan(factory, demo_router, ["DUNE"])
+    assert asked[0] == {"ticker": "DUNE", "limit": events.SCAN_NEWS_LIMIT}
+    assert events.SCAN_NEWS_LIMIT > events.MAX_LISTED_ITEMS
+
+
+def test_an_old_filing_is_not_a_scan_item(demo, factory, demo_router, monkeypatch):
+    old = {"form": "10-K", "filed": "2026-01-15", "url": "https://sec.example/10k", "summary": ""}
+    new = {
+        "form": "8-K",
+        "filed": utcnow().date().isoformat(),
+        "url": "https://sec.example/8k",
+        "summary": "",
+    }
+    monkeypatch.setitem(demo_data.EDGAR_FILINGS, "default", [new, old])
+    events.run_event_scan(factory, demo_router, ["DUNE"])
+    with factory() as db:
+        prompt = _last_prompt(db)
+    assert "https://sec.example/8k" in prompt and "https://sec.example/10k" not in prompt

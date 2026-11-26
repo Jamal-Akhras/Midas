@@ -51,7 +51,8 @@ SEEN_KEY = "event_scan_seen"  # ticker -> {item key: day first shown to the anal
 SEEN_DAYS = 45  # an item this old has left every feed; forget it
 DUPLICATE_WINDOW_DAYS = 30  # how far back an existing flag blocks a repeat
 SAME_EVENT_DAYS = 3  # two reports of one kind this close in date are one event
-MAX_LISTED_ITEMS = 24
+MAX_LISTED_ITEMS = 24  # shown to the analyst in one scan; the rest wait for the next
+SCAN_NEWS_LIMIT = 40  # asked of the feed: more than one screenful, so a busy day is not lost
 
 
 def item_key(item: Mapping[str, Any]) -> str:
@@ -68,7 +69,8 @@ def scan_items(execute: Callable[..., Any], ticker: str) -> tuple[list[dict[str,
     items: list[dict[str, Any]] = []
     complete = True
     try:
-        for n in execute("get_news", {"ticker": ticker})["data"] or []:
+        feed = execute("get_news", {"ticker": ticker, "limit": SCAN_NEWS_LIMIT})
+        for n in feed["data"] or []:
             items.append(
                 {
                     "date": str(n.get("date") or "")[:10],
@@ -80,7 +82,10 @@ def scan_items(execute: Callable[..., Any], ticker: str) -> tuple[list[dict[str,
     except Exception:  # noqa: BLE001 - a feed down is a reason to scan, not to crash
         complete = False
     try:
+        recent = (utcnow().date() - timedelta(days=SEEN_DAYS)).isoformat()
         for f in execute("get_filings", {"ticker": ticker})["data"] or []:
+            if str(f.get("filed") or "")[:10] < recent:
+                continue  # an old filing is history, not an event to scan for
             items.append(
                 {
                     "date": str(f.get("filed") or "")[:10],
@@ -117,7 +122,7 @@ def _mark_seen(db: Session, ticker: str, items: Sequence[Mapping[str, Any]]) -> 
     db.flush()
 
 
-def _task_text(fresh: Sequence[Mapping[str, Any]]) -> str:
+def _task_text(fresh: Sequence[Mapping[str, Any]], *, waiting: int = 0) -> str:
     text = (
         "Scan recent news and filings for this ticker and report "
         "structured event flags. No flags is a normal answer."
@@ -125,9 +130,10 @@ def _task_text(fresh: Sequence[Mapping[str, Any]]) -> str:
     if not fresh:
         return text
     lines = [
-        f"- {i['date'] or 'undated'} | {i['source']} | {i['title']} | {i['url']}"
-        for i in fresh[:MAX_LISTED_ITEMS]
+        f"- {i['date'] or 'undated'} | {i['source']} | {i['title']} | {i['url']}" for i in fresh
     ]
+    if waiting:
+        lines.append(f"({waiting} older item(s) wait for the next scan.)")
     return (
         text + f"\n\nItems not yet judged ({len(fresh)}). Judge only the items listed here: "
         "everything older was judged on an earlier scan, and an event that "
@@ -187,6 +193,8 @@ def run_event_scan(
                 items, complete = scan_items(execute, ticker)
                 seen = _seen(db, ticker)
                 fresh = [i for i in items if i["key"] not in seen]
+                fresh.sort(key=lambda i: i["date"], reverse=True)  # stable: feed order inside a day
+                shown = fresh[:MAX_LISTED_ITEMS]
                 if complete and not fresh:
                     run.status = RunStatus.done
                     record_event(
@@ -205,7 +213,7 @@ def run_event_scan(
                     router,
                     run,
                     AGENT_DEFS["event-analyst"],
-                    task_text=_task_text(fresh),
+                    task_text=_task_text(shown, waiting=len(fresh) - len(shown)),
                     ticker=ticker,
                 )
                 price: float | None = None
@@ -273,11 +281,14 @@ def run_event_scan(
                     payload={
                         "n_flags": len(flags),
                         "duplicates": duplicates,
-                        "new_items": len(fresh),
+                        "new_items": len(shown),
+                        "waiting": len(fresh) - len(shown),
                         "unverified": parsed.unverified,
                     },
                 )
-                _mark_seen(db, ticker, items)  # only now: a failed scan re-reads them
+                # only what was shown, and only now: the rest wait their turn and a
+                # failed scan re-reads its items
+                _mark_seen(db, ticker, shown)
                 db.commit()
                 results.append(
                     {
