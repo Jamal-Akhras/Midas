@@ -4,6 +4,7 @@ midas research fetch [--out data/daily.pkl] [--start 2004-01-01]
 midas research fetch-intraday --symbols SPY,QQQ [--out data/intraday]
 midas research report [--data data/daily.pkl] [--out docs/results.md]
                       [--intraday data/intraday] [--no-clone]
+midas research tone-study --transcripts FILE --dictionary FILE [--counts FILE]
 midas research backtest [--years 10] [--data data/daily.pkl] [--capital 1000]
                         [--out FILE]   # the live configuration, replayed
 """
@@ -152,6 +153,32 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tone_study(args: argparse.Namespace) -> int:
+    import warnings
+
+    import pandas as pd
+
+    from midas.research.data import PriceData
+    from midas.research.text import load_word_lists, score_transcripts, tone_report
+
+    warnings.simplefilter("ignore", FutureWarning)
+    counts = Path(args.counts) if args.counts else None
+    if counts is not None and counts.exists():
+        calls = pd.read_parquet(counts)
+    else:
+        positive, negative = load_word_lists(Path(args.dictionary))
+        calls = score_transcripts(Path(args.transcripts), positive, negative)
+        if counts is not None:
+            counts.parent.mkdir(parents=True, exist_ok=True)
+            calls.to_parquet(counts)
+    text = tone_report(PriceData.from_pickle(Path(args.data)), calls)
+    print(text)
+    if args.out:
+        Path(args.out).write_text(text, encoding="utf-8")
+        print(f"wrote {args.out}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="midas research",
@@ -183,6 +210,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--committee-cost", type=float, default=0.14, help="USD per committee")
     b.add_argument("--out", default="", help="also write the replay to this file")
     b.set_defaults(fn=cmd_backtest)
+    t = sub.add_parser(
+        "tone-study", help="earnings-call tone against the weeks after (docs/studies)"
+    )
+    t.add_argument("--transcripts", required=True, help="parquet with symbol, date, content")
+    t.add_argument("--dictionary", required=True, help="Loughran-McDonald master dictionary CSV")
+    t.add_argument("--counts", default="", help="cache for the word counts (parquet)")
+    t.add_argument("--data", default="data/daily.pkl")
+    t.add_argument("--out", default="")
+    t.set_defaults(fn=cmd_tone_study)
     args = parser.parse_args(argv)
     result: int = args.fn(args)
     return result

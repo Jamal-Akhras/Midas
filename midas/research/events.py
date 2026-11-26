@@ -80,6 +80,14 @@ def forward_returns(
     return raw, raw.sub(bench, axis=0)
 
 
+def universe_excess(raw: pd.DataFrame, liquid_names: pd.DataFrame) -> pd.DataFrame:
+    """Each return minus the mean of the liquid names on the same day. The
+    same-day universe is a tighter benchmark than the index for a stock
+    picked from that universe: it carries the same survivorship lift and
+    the same day, so what is left is the pick."""
+    return raw.sub(raw.where(liquid_names).mean(axis=1), axis=0)
+
+
 def event_row(
     name: str,
     mask: pd.DataFrame,
