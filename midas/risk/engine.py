@@ -19,7 +19,9 @@ from midas.models import (
     Position,
     PositionStatus,
     SystemState,
+    ThesisStatus,
     TradeOutcome,
+    TradeThesis,
     aware,
     utcnow,
 )
@@ -216,6 +218,26 @@ def swing_budget_pct() -> float:
     if settings.core_enabled:
         pct = min(pct, 100.0 - float(settings.core_allocation_pct))
     return max(pct, 0.0)
+
+
+def swing_room_usd(db: Session, account_equity: float) -> float:
+    """What the swing budget still has free: the budget, less what is held,
+    less one full position for every thesis that is approved and waiting to
+    fill. A committee run while this is under the smallest position cannot
+    end in a trade; its risk check can only refuse."""
+    budget = account_equity * swing_budget_pct() / 100.0
+    slot = account_equity * float(settings.max_notional_pct_per_trade) / 100.0
+    waiting = len(
+        list(
+            db.scalars(
+                select(TradeThesis).where(
+                    TradeThesis.status == ThesisStatus.approved,
+                    TradeThesis.book == SWING_BOOK,
+                )
+            )
+        )
+    )
+    return budget - open_notional_usd(db) - waiting * slot
 
 
 # ---------- sizing ----------

@@ -1114,6 +1114,12 @@ def maybe_auto_cycle(session_factory: Callable[[], Session], router: ModelRouter
             return None  # binary risk-off: no research spend on refused entries
         if swing_trial.status(db).ended:
             return None  # the trial's stop rule: no research for a book that is off
+        equity = float(paper_broker.get_account(db)["equity"])
+        if risk_engine.swing_room_usd(db, equity) < settings.min_swing_notional_usd:
+            # the book has no room for a position: a committee now would pay for
+            # its research and meet a risk check that can only refuse. Not
+            # recorded as the day's cycle, so it runs once a slot frees.
+            return None
     from datetime import datetime as _dt
 
     from midas.models import SystemState
