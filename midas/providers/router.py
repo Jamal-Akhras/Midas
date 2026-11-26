@@ -54,6 +54,16 @@ class ModelRouter:
         self.models: dict[str, dict] = table["models"]
         self.task_types: dict[str, list[str]] = table["task_types"]
         self.risk_rules: dict[str, str] = table.get("risk_rules", {})
+        # per-task request options (routing.yaml `task_options`): today only
+        # the temperature of the tasks that read documents into structured data
+        self.task_options: dict[str, dict] = table.get("task_options") or {}
+
+    def _request_options(self, task_type: str) -> dict:
+        """Keyword arguments for the provider call of this task: nothing for a
+        task with no entry, so a provider that predates an option is never
+        handed it."""
+        options = self.task_options.get(task_type) or {}
+        return {"temperature": options["temperature"]} if "temperature" in options else {}
 
     # ---------- pricing / candidates ----------
 
@@ -284,6 +294,7 @@ class ModelRouter:
                     tools=tools,
                     json_output=False,
                     max_tokens=max_tokens,
+                    **self._request_options(task_type),
                 )
                 decision = {**decision_base, "phase": "tool_loop", "iteration": iteration}
                 spent += self._log(
@@ -356,6 +367,7 @@ class ModelRouter:
                 json_output=True,
                 json_schema=schema,
                 max_tokens=max_tokens,
+                **self._request_options(task_type),
             )
             decision = {**decision_base, "phase": "final", "attempt": attempt}
             try:

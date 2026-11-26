@@ -35,12 +35,15 @@ class OpenAIProvider:
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse:
         payload: dict = {
             "model": model,
             "max_tokens": max_tokens,
             "messages": [{"role": "system", "content": system_prompt}, *_to_openai(messages)],
         }
+        if temperature is not None:
+            payload["temperature"] = temperature
         if tools:
             payload["tools"] = [
                 {

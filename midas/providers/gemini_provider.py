@@ -25,12 +25,15 @@ class GeminiProvider:
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse:
         payload: dict = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": _to_gemini(messages),
             "generationConfig": {"maxOutputTokens": max_tokens},
         }
+        if temperature is not None:
+            payload["generationConfig"]["temperature"] = temperature
         if tools:
             payload["tools"] = [
                 {

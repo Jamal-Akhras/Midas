@@ -5,18 +5,29 @@ The event analyst produces flags (kind, severity, direction, source) for a
 ticker. Flags never open positions. A high-severity negative flag vetoes a
 core-book slice (midas.strategy.core); every flag is later scored against
 the ticker's forward return, so "does the LLM's event reading predict
-anything?" has a ledger instead of an opinion."""
+anything?" has a ledger instead of an opinion.
+
+A scan reads each item once. The news and filings of a ticker are fetched
+in code first; what an earlier scan already showed the analyst is left
+out, and when nothing is new the analyst is not called at all. A flag for
+an event that already has one is not written again. Before 2026-11-27 the
+analyst re-read the same fortnight of headlines every day: one article was
+flagged on seven consecutive scans, each restarting the 30-day veto and
+counting once more in the ledger."""
 
 from __future__ import annotations
 
+import hashlib
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from midas.agents.defs import AGENT_DEFS
+from midas.agents.schemas import EventFlagItem
 from midas.audit import record_event
 from midas.config import settings
 from midas.models import (
@@ -36,6 +47,114 @@ from midas.providers.router import ModelRouter
 logger = logging.getLogger(__name__)
 
 LAST_SCAN_KEY = "last_event_scan"
+SEEN_KEY = "event_scan_seen"  # ticker -> {item key: day first shown to the analyst}
+SEEN_DAYS = 45  # an item this old has left every feed; forget it
+DUPLICATE_WINDOW_DAYS = 30  # how far back an existing flag blocks a repeat
+SAME_EVENT_DAYS = 3  # two reports of one kind this close in date are one event
+MAX_LISTED_ITEMS = 24
+
+
+def item_key(item: Mapping[str, Any]) -> str:
+    """A stable identity for a news item or filing: its URL, else its title."""
+    basis = str(item.get("url") or item.get("title") or "").strip().lower()
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+
+
+def scan_items(execute: Callable[..., Any], ticker: str) -> tuple[list[dict[str, Any]], bool]:
+    """(what the feeds hold for the ticker now, whether every feed answered).
+    The same tool calls the analyst would make, made in code and
+    snapshotted like any other. A feed that fails makes the list
+    incomplete: the scan then runs as before and nothing is skipped."""
+    items: list[dict[str, Any]] = []
+    complete = True
+    try:
+        for n in execute("get_news", {"ticker": ticker})["data"] or []:
+            items.append(
+                {
+                    "date": str(n.get("date") or "")[:10],
+                    "source": str(n.get("source") or "news"),
+                    "title": str(n.get("headline") or ""),
+                    "url": str(n.get("url") or ""),
+                }
+            )
+    except Exception:  # noqa: BLE001 - a feed down is a reason to scan, not to crash
+        complete = False
+    try:
+        for f in execute("get_filings", {"ticker": ticker})["data"] or []:
+            items.append(
+                {
+                    "date": str(f.get("filed") or "")[:10],
+                    "source": "SEC",
+                    "title": f"{f.get('form', 'filing')} filed",
+                    "url": str(f.get("url") or ""),
+                }
+            )
+    except Exception:  # noqa: BLE001
+        complete = False
+    for item in items:
+        item["key"] = item_key(item)
+    return items, complete
+
+
+def _seen(db: Session, ticker: str) -> dict[str, str]:
+    row = db.get(SystemState, SEEN_KEY)
+    return dict((row.value or {}).get(ticker, {})) if row is not None else {}
+
+
+def _mark_seen(db: Session, ticker: str, items: Sequence[Mapping[str, Any]]) -> None:
+    today = utcnow().date()
+    cutoff = (today - timedelta(days=SEEN_DAYS)).isoformat()
+    row = db.get(SystemState, SEEN_KEY)
+    table: dict[str, dict[str, str]] = dict(row.value or {}) if row is not None else {}
+    known = {k: day for k, day in table.get(ticker, {}).items() if day >= cutoff}
+    for item in items:
+        known.setdefault(str(item["key"]), today.isoformat())
+    table[ticker] = known
+    if row is None:
+        db.add(SystemState(key=SEEN_KEY, value=table))
+    else:
+        row.value = table
+    db.flush()
+
+
+def _task_text(fresh: Sequence[Mapping[str, Any]]) -> str:
+    text = (
+        "Scan recent news and filings for this ticker and report "
+        "structured event flags. No flags is a normal answer."
+    )
+    if not fresh:
+        return text
+    lines = [
+        f"- {i['date'] or 'undated'} | {i['source']} | {i['title']} | {i['url']}"
+        for i in fresh[:MAX_LISTED_ITEMS]
+    ]
+    return (
+        text + f"\n\nItems not yet judged ({len(fresh)}). Judge only the items listed here: "
+        "everything older was judged on an earlier scan, and an event that "
+        "already has a flag must not be flagged again.\n" + "\n".join(lines)
+    )
+
+
+def _day(text: str) -> date | None:
+    try:
+        return date.fromisoformat(str(text)[:10])
+    except ValueError:
+        return None
+
+
+def same_event(item: EventFlagItem, old: EventFlag) -> bool:
+    """Is this flag the event `old` already records? The same kind, and
+    either the same article or two dates within SAME_EVENT_DAYS. Severity
+    and direction are not compared: the first reading stands, and a second
+    outlet's wording does not make a second event."""
+    if item.kind != old.kind:
+        return False
+    if item.source_url and item.source_url == old.source_url:
+        return True
+    new_day, old_day = _day(item.event_date), _day(old.event_date or "")
+    if new_day is None or old_day is None:
+        return False
+    return abs((new_day - old_day).days) <= SAME_EVENT_DAYS
 
 
 def run_event_scan(
@@ -64,27 +183,64 @@ def run_event_scan(
             )
             db.commit()
             try:
+                execute = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)
+                items, complete = scan_items(execute, ticker)
+                seen = _seen(db, ticker)
+                fresh = [i for i in items if i["key"] not in seen]
+                if complete and not fresh:
+                    run.status = RunStatus.done
+                    record_event(
+                        db,
+                        event_type="flags.skipped",
+                        summary=f"{ticker}: nothing new since the last scan",
+                        actor_type=ActorType.system,
+                        run_id=run.id,
+                        payload={"items": len(items)},
+                    )
+                    db.commit()
+                    results.append({"ticker": ticker, "flags": [], "skipped": "no new items"})
+                    continue
                 artifact, parsed = run_agent_stage(
                     db,
                     router,
                     run,
                     AGENT_DEFS["event-analyst"],
-                    task_text=(
-                        "Scan recent news and filings for this ticker and report "
-                        "structured event flags. No flags is a normal answer."
-                    ),
+                    task_text=_task_text(fresh),
                     ticker=ticker,
                 )
                 price: float | None = None
                 try:
-                    quote = ToolContext(db, run_id=run.id, ticker=ticker).executor(TOOLS)(
-                        "get_quote", {"ticker": ticker}
-                    )
+                    quote = execute("get_quote", {"ticker": ticker})
                     price = float(quote["data"]["price"])
                 except Exception:  # a flag without a price still counts; it just cannot be scored
                     logger.warning("no quote for %s at flag time", ticker)
+                since = utcnow() - timedelta(days=DUPLICATE_WINDOW_DAYS)
+                known = [
+                    f
+                    for f in db.scalars(select(EventFlag).where(EventFlag.ticker == ticker))
+                    if aware(f.created_at) >= since
+                ]
                 flags = []
+                duplicates = 0
                 for item in parsed.flags:
+                    earlier = next((f for f in [*known, *flags] if same_event(item, f)), None)
+                    if earlier is not None:
+                        duplicates += 1
+                        first = earlier.created_at.date() if earlier.created_at else "this scan"
+                        record_event(
+                            db,
+                            event_type="flags.duplicate",
+                            summary=f"{ticker}: {item.kind} already flagged on {first} "
+                            f"({earlier.severity} {earlier.direction}); not recorded again",
+                            actor_type=ActorType.system,
+                            run_id=run.id,
+                            payload={
+                                "source_url": item.source_url,
+                                "severity": item.severity,
+                                "direction": item.direction,
+                            },
+                        )
+                        continue
                     flag = EventFlag(
                         run_id=run.id,
                         artifact_id=artifact.id,
@@ -114,8 +270,14 @@ def run_event_scan(
                     ),
                     actor_type=ActorType.agent,
                     run_id=run.id,
-                    payload={"n_flags": len(flags), "unverified": parsed.unverified},
+                    payload={
+                        "n_flags": len(flags),
+                        "duplicates": duplicates,
+                        "new_items": len(fresh),
+                        "unverified": parsed.unverified,
+                    },
                 )
+                _mark_seen(db, ticker, items)  # only now: a failed scan re-reads them
                 db.commit()
                 results.append(
                     {
@@ -124,6 +286,7 @@ def run_event_scan(
                             {"kind": f.kind, "severity": f.severity, "direction": f.direction}
                             for f in flags
                         ],
+                        "duplicates": duplicates,
                     }
                 )
             except Exception as exc:

@@ -52,6 +52,7 @@ class FakeProvider:
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse:
         self.calls.append(
             {"model": model, "messages": list(messages), "tools": tools, "json_output": json_output}

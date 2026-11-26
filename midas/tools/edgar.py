@@ -48,6 +48,12 @@ def get_filings(ticker: str, forms: str = "10-K,10-Q,8-K,DEF 14A", limit: int = 
     wanted = {f.strip().upper() for f in forms.split(",") if f.strip()}
     try:
         cik = _cik_for(ticker)
+    except ToolError:
+        # an ETF or fund is not a company registrant: it has no filings of
+        # these forms, which is an answer, not a failure (QQQ, EFA and IEF
+        # failed this call on every scan)
+        return ToolResult(data=[], source="edgar")
+    try:
         r = httpx.get(f"https://data.sec.gov/submissions/CIK{cik}.json", headers=UA, timeout=30)
         r.raise_for_status()
         recent = r.json()["filings"]["recent"]

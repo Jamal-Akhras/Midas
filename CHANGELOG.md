@@ -187,6 +187,20 @@ not yet cut a release, so everything sits under Unreleased.
   `cost.divergence` audit event when they disagree; `docs/tollgate.md`.
 
 ### Changed
+- The event scan reads each item once. News and filings are fetched in code
+  first; the analyst is shown only what no earlier scan has shown it, and
+  is not called when nothing is new (`flags.skipped`). A flag for an event
+  that already has one (same kind, and the same article or dates within
+  three days) is not written again (`flags.duplicate`). One Netflix article
+  had been flagged on seven consecutive scans, each restarting the 30-day
+  veto and counting again in the scored ledger.
+- `routing.yaml` takes `task_options`; the scan tasks (`event_scan`,
+  `screening`) run at temperature 0, so the same text gets the same reading.
+  Sent to OpenAI and Gemini; accepted and not yet sent to Anthropic.
+- The daily cycle stands aside while the swing book has no room for the
+  smallest position, counting an approved thesis that has not filled as a
+  position taken (`risk.engine.swing_room_usd`). In a ten-year replay about
+  nine committees in ten had run with no slot free.
 - The room rule and the first-target cap apply to a gap-and-hold as well as
   a pullback, wherever a 20-day high is overhead: six of the ten committees
   that ended at the level checks (2026-11-13 to 11-19) were gap-and-holds
@@ -226,6 +240,12 @@ not yet cut a release, so everything sits under Unreleased.
   research and audit layer.
 
 ### Fixed
+- `get_news` ordered Finnhub's epoch dates and Alpaca's ISO dates as text,
+  so Finnhub's headlines always ranked last and were the ones cut. Both are
+  now parsed to one UTC clock before the sort.
+- `get_filings` answered every ETF with an error (no company registrant);
+  it now returns an empty list. Three of the five core tickers had failed
+  the call on every scan.
 - The research data loader drops rows that are not sessions. `^VIX` carried a
   value on Memorial Day and Labor Day 2026; those two rows left every 200-day
   average blank for 200 sessions, so no trend rule in `docs/results.md` traded

@@ -59,6 +59,7 @@ class ModelProvider(Protocol):
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse: ...
 
 

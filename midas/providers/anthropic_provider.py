@@ -36,7 +36,12 @@ class AnthropicProvider:
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse:
+        # `temperature` is accepted and not sent: some current Claude models
+        # reject sampling parameters, and which of the models in routing.yaml
+        # do has not been checked. A rejected request would push every scan
+        # task to the next provider. Verify against the API before sending it.
         payload: dict = {
             "model": model,
             "max_tokens": max_tokens,

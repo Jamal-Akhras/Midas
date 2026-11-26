@@ -329,6 +329,7 @@ class DemoProvider:
         json_output: bool = False,
         json_schema: dict | None = None,
         max_tokens: int = 4000,
+        temperature: float | None = None,
     ) -> ModelResponse:
         marker = _MARKER.search(system_prompt)
         slug = marker.group(1) if marker else ""

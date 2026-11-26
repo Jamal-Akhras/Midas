@@ -5,7 +5,7 @@ are wired; Finnhub is tried first). Demo fixtures otherwise.
 """
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -202,6 +202,20 @@ def _alpaca_news(ticker: str, limit: int) -> list[dict]:
     ]
 
 
+def news_time(value: object) -> datetime | None:
+    """A provider's timestamp as an aware UTC datetime: Finnhub sends epoch
+    seconds, Alpaca an ISO string. None when there is nothing to parse."""
+    if value is None or value == "":
+        return None
+    try:
+        if isinstance(value, (int, float)) or str(value).strip().isdigit():
+            return datetime.fromtimestamp(float(str(value).strip()), tz=timezone.utc)
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except (ValueError, OverflowError, OSError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def get_news(ticker: str, limit: int = 10) -> ToolResult:
     """Recent company news, merged from every configured provider
     (Finnhub company news + Alpaca/Benzinga real-time), deduplicated by
@@ -239,7 +253,14 @@ def get_news(ticker: str, limit: int = 10) -> ToolResult:
         raise ToolError(
             f"all news sources failed ({'; '.join(errors)}); news claims must go in 'unverified'"
         )
-    merged.sort(key=lambda n: str(n.get("date", "")), reverse=True)
+    # One clock for every source. Sorted as text, Finnhub's epoch seconds
+    # always ranked under Alpaca's ISO dates and were the ones cut.
+    stamped = [(news_time(n.get("date")), n) for n in merged]
+    for when, n in stamped:
+        n["date"] = when.strftime("%Y-%m-%dT%H:%M:%SZ") if when else ""
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    stamped.sort(key=lambda pair: pair[0] or floor, reverse=True)
+    merged = [n for _, n in stamped]
     return ToolResult(data=merged[: max(limit, 12)], source="+".join(used))
 
 
