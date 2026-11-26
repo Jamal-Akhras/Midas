@@ -252,6 +252,7 @@ midas research fetch                 # daily bars (yfinance) -> data/daily.pkl
 midas research fetch-intraday --symbols SPY,QQQ   # Alpaca 5-minute bars -> data/intraday/
 midas research report                # -> docs/results.md
 midas research backtest --years 10   # the live configuration, replayed
+midas research tone-study --transcripts FILE --dictionary FILE   # docs/studies/
 ```
 
 ## The Analyst Workstation

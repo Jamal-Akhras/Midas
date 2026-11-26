@@ -7,6 +7,14 @@ not yet cut a release, so everything sits under Unreleased.
 ## [Unreleased]
 
 ### Added
+- `midas.research.text` and `midas research tone-study`: word-list tone for
+  earnings calls, a point-in-time rank, and the study that tests it against
+  the weeks after with the earnings-day reaction as a control and a shuffled
+  placebo. The protocol and pass mark were committed before any result
+  (`docs/studies/2026-11-earnings-call-tone.md`). Result: the tone score
+  moves with the earnings-day reaction (rank correlation 0.15) and predicts
+  nothing from the next session on, so the study fails and no model is
+  trained.
 - `midas research backtest --years N`: the account as the live settings
   describe it, replayed over the last N years - the core book with its
   T-bill sleeve and the swing rules as code (reclaim, structural stop,

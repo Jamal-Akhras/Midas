@@ -113,4 +113,93 @@ for a new protocol, not a pass.
 
 ## Results
 
-_To be filled in after the run._
+Run 2026-11-27 on commit 800d369 (protocol fixed in 60e963c), with
+`midas research tone-study`. **The study fails its pass mark on all four
+criteria; the placebo is clean. Per the protocol the project stops here:
+no model is trained.**
+
+Primary: abnormal tone, 20 sessions from the open after the signal day, excess over the same-day universe. 21,991 ranked events, 2010-01-07 to 2025-05-16.
+
+| group | events | days | net return % | excess % | t | since 2020 excess % | t |
+|---|---|---|---|---|---|---|---|
+| top quintile | 4,391 | 1533 | +0.95 | -0.04 | -0.4 | +0.12 | 0.6 |
+| middle three | 12,958 | 2391 | +0.97 | -0.09 | -0.8 | +0.21 | 1.0 |
+| bottom quintile | 4,642 | 1538 | +1.10 | -0.04 | -0.2 | -0.01 | -0.0 |
+| all calls | 21,991 | 2734 | +1.14 | -0.01 | -0.1 | +0.33 | 2.1 |
+
+Top minus bottom quintile: +0.09% (t 0.4, 961 days with both legs).
+
+Spread inside each third of the earnings-day price reaction:
+
+| reaction group | spread % | t | days |
+|---|---|---|---|
+| weak reaction | -0.15 | -0.4 | 370 |
+| middle reaction | -0.31 | -1.3 | 400 |
+| strong reaction | -0.12 | -0.2 | 354 |
+
+Against the pass mark:
+
+| criterion | observed | result |
+|---|---|---|
+| long leg: at least +0.40% over the universe, t of 3 or more | -0.04%, t -0.4 | FAIL |
+| recent: the same sign since 2020 with t of 2 or more | +0.12%, t 0.6 | FAIL |
+| spread: top minus bottom quintile positive, t of 2 or more | +0.09%, t 0.4 over 961 days | FAIL |
+| beyond the price reaction: spread positive in each reaction group, their mean at least half the unconditional spread | weak reaction -0.15%, middle reaction -0.31%, strong reaction -0.12% | FAIL |
+| placebo: shuffled score's long leg has |t| under 2 | -0.03%, t -0.2 | pass |
+
+**Verdict: FAIL.**
+
+Reported, not judged:
+
+| variant | events | long leg excess % | t | since 2020 % | t | spread % | t |
+|---|---|---|---|---|---|---|---|
+| 5 sessions | 21,991 | -0.02 | -0.2 | +0.02 | 0.1 | +0.05 | 0.4 |
+| 60 sessions | 21,991 | -0.29 | -1.2 | -0.50 | -1.0 | +0.48 | 1.3 |
+| raw tone level, 20 sessions | 22,381 | -0.19 | -1.4 | -0.30 | -1.1 | -0.51 | -1.9 |
+| negative-word share alone, 20 sessions | 22,381 | -0.10 | -0.7 | -0.24 | -0.8 | -0.02 | -0.1 |
+| against SPY, 20 sessions | 21,991 | +0.30 | 1.9 | +0.31 | 0.9 | +0.09 | 0.4 |
+| after-close calls entered at the next open, 20 sessions | 21,984 | +0.00 | 0.0 | +0.11 | 0.4 | +0.20 | 0.9 |
+| price reaction alone, no text, 20 sessions | 22,381 | +0.06 | 0.5 | +0.31 | 1.3 | +0.06 | 0.3 |
+
+### What the result says
+
+The score is not noise. On the earnings day itself the market moves with
+it: against the universe, the lowest-tone fifth of calls falls 1.15% and
+the highest rises 0.95%, in order across all five groups (t about 14 at
+each end), with a rank correlation of 0.15 that holds in every year from
+2010 to 2025. A word count is measuring what investors react to.
+
+And by the next session it is in the price. From the open after the
+signal day the top fifth earns -0.04% over the universe in 20 sessions
+(t -0.4) and the spread over the bottom fifth is +0.09% (t 0.4); the test
+could see about 0.5%. Inside each third of the earnings-day reaction the
+spread is negative. The plain price reaction, with no text, shows no
+drift either (+0.06%, t 0.5): post-earnings drift is not there to be had
+in large caps a session late, with or without words.
+
+That matches the published evidence this study was built on: text
+predicts returns where it is slow to be read, in small companies and in
+the first hours. Midas trades neither.
+
+### Notes on the run
+
+- The first run printed the negative-word row with the same numbers as
+  the raw tone level. The score had been written as negative words over
+  positive plus negative words, which is tone in other units. It was
+  changed to negative words per 1,000 characters and the report rerun;
+  the row above is the corrected one. It is an unjudged row and the
+  primary result did not move.
+- The 60-session spread (+0.48%, t 1.3) and the long leg against SPY
+  (+0.30%, t 1.9) are the largest unjudged numbers. Neither is close to
+  a result, and the second is the survivorship lift the same-day
+  universe was chosen to remove.
+- The validity figures in the first paragraph were computed after the
+  verdict, to check that a null was not a broken pipeline. They are a
+  description of the earnings day, not a tradable result: the reaction
+  happens before the entry.
+
+### What would reopen this
+
+A universe where text is read slowly (small and mid caps, with
+point-in-time constituents and delisted names), or the ability to act
+within the first hour of a release. Neither is a model change.

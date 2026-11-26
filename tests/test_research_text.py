@@ -264,3 +264,20 @@ def test_the_report_states_the_verdict_and_the_unjudged_rows():
     )
     assert "Against the pass mark:" in report and "**Verdict: FAIL.**" in report  # pure noise
     assert "Reported, not judged:" in report and "price reaction alone" in report
+
+
+def test_the_negative_score_is_a_density_not_tone_in_other_units():
+    sessions = pd.bdate_range("2024-01-01", periods=10)
+    calls = pd.DataFrame(
+        {
+            "symbol": ["A", "B"],
+            "ts": pd.to_datetime(["2024-01-02 10:00", "2024-01-02 10:00"]),
+            "pos": [60, 60],
+            "neg": [40, 40],
+            "chars": [10_000, 40_000],  # the same tone, said in a quarter of the words
+        }
+    )
+    out = text.build_events(calls, sessions, ["A", "B"]).set_index("symbol")
+    assert out.loc["A", "tone"] == out.loc["B", "tone"] == pytest.approx(0.2)
+    assert out.loc["A", "negative"] == pytest.approx(-4.0)
+    assert out.loc["B", "negative"] == pytest.approx(-1.0)

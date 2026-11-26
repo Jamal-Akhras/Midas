@@ -201,7 +201,11 @@ def build_events(
                 "ts": pd.Timestamp(row.ts),
                 "signal_day": day,
                 "tone": value,
-                "negative": -int(row.neg) / (int(row.pos) + int(row.neg)),
+                # negative words per 1,000 characters, signed so that higher is
+                # better. Not neg / (pos + neg): that is tone again, in other units.
+                "negative": -1000.0 * int(row.neg) / max(int(getattr(row, "chars", 0) or 0), 1)
+                if "chars" in keep.columns
+                else float("nan"),
             }
         )
     out = pd.DataFrame(rows, columns=["symbol", "ts", "signal_day", "tone", "negative"])
